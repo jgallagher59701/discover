@@ -38,7 +38,7 @@ import duckdb
 # (the "crawl" partition values, e.g. CC-MAIN-2025-08). One crawl is plenty
 # to start; add more for higher recall.
 CRAWLS = [
-    "CC-MAIN-2025-08",
+    "CC-MAIN-2026-21",
 ]
 
 # Strong path signals + DAP response suffixes. Lower-cased; dots escaped.
@@ -50,12 +50,27 @@ DAP_REGEX = (
     r"|\.(dds|das|dods|dmr|dap|dsr|info)($|\?))"  # DAP2/DAP4 suffixes
 )
 
+# This 'secret' is used because the CC bucket is public. There are other
+# ways to 'authenticate' but this is good enough. For example, you could use
+# AWS credentials. E.G.:
+# CREATE SECRET cc (
+#     TYPE s3,
+#     KEY_ID 'AKIA...',
+#     SECRET '...',
+#     REGION 'us-east-1'
+# );
+# However, without _something_ in the SETUP_SQL variable DuckDB will grab what is can
+# from the env vars or ~/.aws/credentials and that might not be what you want.
+# jhrg 6/15/26
+
 SETUP_SQL = """
 INSTALL httpfs;
 LOAD httpfs;
-SET s3_region='us-east-1';
--- commoncrawl is a public bucket; DuckDB uses anonymous access when no
--- credentials are present. If you hit a signing error, see README.md.
+CREATE SECRET cc (
+    TYPE s3,
+    PROVIDER credential_chain,
+    REGION 'us-east-1'
+);
 """
 
 QUERY_TEMPLATE = """
