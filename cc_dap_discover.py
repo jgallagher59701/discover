@@ -42,6 +42,8 @@ CRAWLS = [
 ]
 
 # Strong path signals + DAP response suffixes. Lower-cased; dots escaped.
+#
+# What about looking for URLs with `contents.html` in the path? jhrg 6/16/26
 DAP_REGEX = (
     r"(/thredds/(dodsc|catalog)"      # THREDDS OPeNDAP access + catalogs
     r"|/opendap/"                      # Hyrax / generic OPeNDAP root
@@ -73,6 +75,7 @@ CREATE SECRET cc (
 );
 """
 
+# What about looking at other TLD like gov, com, or ANY TLD? jhrg 6/16/26
 QUERY_TEMPLATE = """
 SELECT url, url_host_name, content_mime_type
 FROM read_parquet(
