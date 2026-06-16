@@ -12,6 +12,11 @@ the Common Crawl (CC) S3 bucket accessed using DuckDB.
 This can be done using anonymous credentials since the CC data is in
 an open S3 bucket.
 
+## Documentation for DuckDB and Common Crawl
+
+* [DuckDB](https://duckdb.org/docs/current/core_extensions/httpfs/s3api)
+* [Common Crawl (CC)](https://commoncrawl.org/get-started)
+
 ## ABout various searches of the Common Crawl (CC) database
 
 For these, the .csv and .txt are from the same run, so I'll only list
