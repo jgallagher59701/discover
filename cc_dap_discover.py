@@ -49,7 +49,8 @@ DAP_REGEX = (
     r"|/opendap/"                      # Hyrax / generic OPeNDAP root
     r"|/erddap/(grid|table)dap/"       # ERDDAP griddap & tabledap
     r"|/dap/"                          # generic DAP mount (noisier)
-    r"|\.(dds|das|dods|dmr|dap|dsr|info)($|\?))"  # DAP2/DAP4 suffixes
+    r"|/(contents.html|catalog.xml)($|\?)"
+    r"|\.(dds|das|dods|dmr|dap|dsr)($|\?))"  # DAP2/DAP4 suffixes
 )
 
 # This 'secret' is used because the CC bucket is public. There are other
@@ -76,16 +77,53 @@ CREATE SECRET cc (
 """
 
 # What about looking at other TLD like gov, com, or ANY TLD? jhrg 6/16/26
+# AND (
+#     url_host_tld IN ('edu','org','gov','mil')
+#     OR url_host_name LIKE '%.ac.%'    -- academic ccTLDs: ac.uk, ac.jp, ...
+#     OR url_host_name LIKE '%.edu.%'   -- edu.au, edu.cn, ...
+#     OR url_host_name LIKE '%.gov.%'   -- gov.uk, gov.au, ...
+# )
+#
+# Original query template
+
+# QUERY_TEMPLATE = """
+# SELECT url, url_host_name, url_host_tld, content_mime_type
+# FROM read_parquet(
+#     's3://commoncrawl/cc-index/table/cc-main/warc/crawl={crawl}/subset=warc/*.parquet',
+#     hive_partitioning = true
+# )
+# WHERE url_host_tld IN ('edu', 'org')
+#   AND fetch_status = 200
+#   AND regexp_matches(lower(url), '{regex}')
+# """
+#
+# No TLD filtering
+#
 QUERY_TEMPLATE = """
-SELECT url, url_host_name, content_mime_type
+SELECT url, url_host_name, url_host_tld, content_mime_type
 FROM read_parquet(
     's3://commoncrawl/cc-index/table/cc-main/warc/crawl={crawl}/subset=warc/*.parquet',
     hive_partitioning = true
 )
-WHERE url_host_tld IN ('edu', 'org')
-  AND fetch_status = 200
+WHERE fetch_status = 200
   AND regexp_matches(lower(url), '{regex}')
 """
+
+# QUERY_TEMPLATE = """
+# SELECT url, url_host_name, url_host_tld, content_mime_type
+# FROM read_parquet(
+#     's3://commoncrawl/cc-index/table/cc-main/warc/crawl={crawl}/subset=warc/*.parquet',
+#     hive_partitioning = true
+# )
+# WHERE (
+#         url_host_tld IN ('edu', 'org', 'gov', 'mil')
+#         OR url_host_name LIKE '%.ac.%'    -- academic ccTLDs: ac.uk, ac.jp, ...
+#         OR url_host_name LIKE '%.edu.%'   -- edu.au, edu.cn, ...
+#         OR url_host_name LIKE '%.gov.%'   -- gov.uk, gov.au, ...
+#       )
+#   AND fetch_status = 200
+#   AND regexp_matches(lower(url), '{regex}')
+# """
 
 
 def run():
@@ -102,8 +140,8 @@ def run():
             print(f"[!] query failed for {crawl}: {exc}", file=sys.stderr)
             continue
         print(f"[*] {crawl}: {len(rows)} candidate rows", file=sys.stderr)
-        for url, host, mime in rows:
-            seen.setdefault(url, (host, mime))
+        for url, host, tld, mime in rows:
+            seen.setdefault(url, (host, tld, mime))
 
     print(f"[*] {len(seen)} unique candidate URLs total", file=sys.stderr)
 
@@ -115,8 +153,8 @@ def run():
         w = csv.writer(f)
         w.writerow(["url", "host", "content_mime_type"])
         for url in sorted(seen):
-            host, mime = seen[url]
-            w.writerow([url, host, mime])
+            host, tld, mime = seen[url]
+            w.writerow([url, host, tld, mime])
 
     print("[*] wrote candidate_urls.txt and candidate_urls.csv", file=sys.stderr)
 
