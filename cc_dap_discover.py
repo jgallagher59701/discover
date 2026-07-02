@@ -9,7 +9,9 @@ The CC index is public Parquet on S3, partitioned by crawl and subset:
     s3://commoncrawl/cc-index/table/cc-main/warc/crawl=<CRAWL>/subset=warc/*.parquet
 
 We project only the columns we need and filter on:
-    * url_host_tld -> 'edu' / 'org'
+    * content_mime_type
+    * url_host_name
+    * url_host_tld -> 'edu' / 'org' (or everything, see below)
     * url          -> DAP path & suffix signatures (regex)
 
 Output:
@@ -62,7 +64,7 @@ DAP_REGEX = (
 #     SECRET '...',
 #     REGION 'us-east-1'
 # );
-# However, without _something_ in the SETUP_SQL variable DuckDB will grab what is can
+# However, without _something_ in the SETUP_SQL variable, DuckDB will grab what it can
 # from the env vars or ~/.aws/credentials and that might not be what you want.
 # jhrg 6/15/26
 
@@ -85,7 +87,7 @@ CREATE SECRET cc (
 # )
 #
 # Original query template
-
+#
 # QUERY_TEMPLATE = """
 # SELECT url, url_host_name, url_host_tld, content_mime_type
 # FROM read_parquet(
@@ -97,7 +99,7 @@ CREATE SECRET cc (
 #   AND regexp_matches(lower(url), '{regex}')
 # """
 #
-# No TLD filtering
+# No TLD filtering - search every TLD.
 #
 QUERY_TEMPLATE = """
 SELECT url, url_host_name, url_host_tld, content_mime_type
@@ -130,7 +132,7 @@ def run():
     con = duckdb.connect()
     con.execute(SETUP_SQL)
 
-    seen = {}  # url -> (host, mime); dedupe across crawls
+    seen = {}  # url -> (host, tld, mime); dedupe across crawls
     for crawl in CRAWLS:
         sql = QUERY_TEMPLATE.format(crawl=crawl, regex=DAP_REGEX)
         print(f"[*] querying {crawl} ...", file=sys.stderr)
