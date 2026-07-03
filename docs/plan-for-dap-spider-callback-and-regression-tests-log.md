@@ -75,3 +75,36 @@ regression tests as outlined above."
   selection) as explicit gates before the bulk of each part proceeds.
 - No code was written in this step — plan and log only, per the request to
   "write a plan."
+
+## 2026-07-03 (Step A1)
+
+**Prompt:** "Perform step 1A of the plan."
+
+**Reasoning / actions:**
+
+- Confirmed the `discover` conda env (scrapy 2.16.0, pytest 9.1.1) is what
+  has scrapy installed — `base` does not. Ran everything below via
+  `conda activate discover`.
+- Spiked the harness assumption from Step A1 in a throwaway `python -c`
+  before writing any test code: instantiated `DapSpider(seeds_file='dummy')`
+  directly (no `Crawler`/`CrawlerProcess`), confirmed `spider.logger` works
+  and logs without error, built a real `scrapy.http.TextResponse` by hand,
+  and called `spider.on_dmr(resp, base=...)` directly. It returned the
+  expected DAP4 result dict on the first try — confirms the plan's assumed
+  approach (real `TextResponse` objects, no crawler) works exactly as
+  expected; no surprises to report.
+- Added `make_response()` (builds a `TextResponse` from url/body/status/
+  headers) and a `spider` pytest fixture (a bare `DapSpider` instance) to
+  `tests/conftest.py`.
+- Added one spike test, `test_harness_on_dmr_confirms_dap4_from_body_signature`,
+  to `tests/test_dap_spider.py` exercising the harness end-to-end through
+  `pytest` (not just the throwaway script), asserting the full result dict
+  `on_dmr` yields for a DAP4 body-signature match. Full case coverage for
+  `on_dmr`/`on_dds`/`probe`/`parse_thredds_catalog`/`start` is Steps A2-A4,
+  not this step.
+- Ran `pytest tests/ -v`: all 29 tests pass (28 pre-existing + 1 new), in
+  0.02s — confirms the new harness doesn't break the existing pure-function
+  suite and runs with no network access.
+- Did not proceed to Steps A2-A4 — Step A1 was scoped as the harness spike
+  only, per the plan's "gate everything else in Part A" framing. Waiting for
+  review before continuing.
