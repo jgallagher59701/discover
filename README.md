@@ -45,6 +45,21 @@ The politeness defaults (robots.txt obeyed, 1 request/domain, ~2s delay,
 autothrottle) keep the crawler from looking like a scanner to institutional
 IDS. Loosen them only for hosts you operate or have permission to hit hard.
 
+## Tests
+
+```bash
+pip install pytest
+pytest tests/ -v
+```
+
+Unit tests for the pure helper functions (`strip_dap_suffix`,
+`strip_query_string`, `is_thredds_catalog`) and for `DapSpider`'s callbacks
+(`probe`, `on_dmr`, `on_dds`, `parse_thredds_catalog`, `start`), run against
+synthetic `scrapy.http.Response` objects — no network access, runs in well
+under a second. There's no live-crawl test suite; see
+`docs/plan-for-dap-spider-callback-and-regression-tests.md` for the plan to
+add regression coverage from real crawl data.
+
 ## Athena variant (Stage 1, server-side, cheaper at scale)
 
 The same logic runs on the Glue-cataloged CC index. Replace the
