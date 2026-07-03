@@ -1,3 +1,4 @@
+import asyncio
 import types
 
 import pytest
@@ -385,4 +386,63 @@ def test_parse_thredds_catalog_html_rendered_page_yields_nothing(spider):
         url="http://example.org/thredds/catalog/catalog.html", body=body
     )
     results = list(spider.parse_thredds_catalog(response))
+    assert results == []
+
+
+# ---- DapSpider.start (plan Step A4) ---------------------------------------
+
+
+async def _drain(agen):
+    return [item async for item in agen]
+
+
+def test_start_skips_blank_and_comment_lines(tmp_path, spider):
+    seeds = tmp_path / "seeds.txt"
+    seeds.write_text("\n# a comment\n   \nhttp://example.org/data/foo.dds\n")
+    spider.seeds_file = str(seeds)
+    results = asyncio.run(_drain(spider.start()))
+    # the only non-skipped line is the last one; skipped lines produce no
+    # requests at all, not empty/error requests
+    assert len(results) == 1
+    assert results[0].url == "http://example.org/data/foo.dmr.xml"
+
+
+def test_start_classifies_thredds_catalog_seed(tmp_path, spider):
+    seeds = tmp_path / "seeds.txt"
+    seeds.write_text("http://example.org/thredds/catalog/catalog.xml\n")
+    spider.seeds_file = str(seeds)
+    results = asyncio.run(_drain(spider.start()))
+    assert len(results) == 1
+    req = results[0]
+    # dispatched to parse_thredds_catalog on the raw seed URL, not stripped
+    assert req.url == "http://example.org/thredds/catalog/catalog.xml"
+    assert req.callback == spider.parse_thredds_catalog
+    assert req.errback == spider.on_error
+
+
+def test_start_probe_seed_uses_stripped_base_not_raw_url(tmp_path, spider):
+    seeds = tmp_path / "seeds.txt"
+    seeds.write_text("http://example.org/data/foo.dds\n")
+    spider.seeds_file = str(seeds)
+    results = asyncio.run(_drain(spider.start()))
+    assert len(results) == 1
+    # base is the DAP-suffix-stripped seed, then probe() re-appends .dmr.xml
+    # -- the raw seed URL itself is never requested directly
+    assert results[0].url == "http://example.org/data/foo.dmr.xml"
+    assert results[0].cb_kwargs == {"base": "http://example.org/data/foo"}
+
+
+def test_start_probes_seed_with_no_suffix_as_is(tmp_path, spider):
+    seeds = tmp_path / "seeds.txt"
+    seeds.write_text("http://example.org/data/foo\n")
+    spider.seeds_file = str(seeds)
+    results = asyncio.run(_drain(spider.start()))
+    assert len(results) == 1
+    assert results[0].url == "http://example.org/data/foo.dmr.xml"
+    assert results[0].cb_kwargs == {"base": "http://example.org/data/foo"}
+
+
+def test_start_no_seeds_file_yields_nothing(spider):
+    spider.seeds_file = None
+    results = asyncio.run(_drain(spider.start()))
     assert results == []

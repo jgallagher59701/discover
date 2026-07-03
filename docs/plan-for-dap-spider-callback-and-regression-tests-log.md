@@ -205,3 +205,37 @@ regression tests as outlined above."
   logic in `start()` should rewrite `.html` catalog URLs to their `.xml`
   counterpart before requesting.
 - Did not touch `start()` (Step A4) — waiting for review before continuing.
+
+## 2026-07-03 (Step A4)
+
+**Prompt:** "run step A4."
+
+**Reasoning / actions:**
+
+- `start()` is an `async def` generator; drove it with the small local
+  `_drain()` helper (`[item async for item in agen]` wrapped in
+  `asyncio.run`) exactly as scoped in the plan — no `pytest-asyncio`
+  dependency added.
+- Used `tmp_path` to write real seed files to disk and pointed
+  `spider.seeds_file` at them (overriding the `spider` fixture's default
+  `"unused"` value), since `start()` does a real `open()` call.
+- Covered all five planned cases: blank/comment lines skipped without
+  producing any request (verified by combining them with one real seed line
+  in the same file, so a bug that turned "skip" into "silently drop
+  everything" wouldn't be missed); a THREDDS-catalog seed dispatches on the
+  *raw* URL with `callback=parse_thredds_catalog`/`errback=on_error`; a
+  DAP-suffixed seed is stripped to its base *before* probing (asserted the
+  actual request URL is the re-suffixed base, i.e. the raw seed URL itself
+  is never requested directly — this is the detail most likely to silently
+  break if someone "simplified" the strip-then-reappend logic later); a
+  suffixless, non-catalog seed is probed as-is; and `seeds_file=None` yields
+  nothing without raising.
+- Ran `pytest tests/ -v`: 56/56 pass (51 pre-existing + 5 new) in 0.05s, no
+  network access.
+- This closes out **Part A** of the plan (`probe`, `on_dmr`, `on_dds`,
+  `on_error`, `parse_thredds_catalog`, `start` all have direct unit-test
+  coverage now, on top of the pre-existing pure-function suite). Part B
+  (regression tests from real `crawls/first/` data) starts with Step B1 —
+  selecting and freezing a small seed list — which needs your input on
+  which specific URLs to pick, per the plan's review point. Waiting for
+  direction before proceeding to B1.
