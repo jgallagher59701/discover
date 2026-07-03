@@ -22,7 +22,7 @@ candidates (expensive, hits real hosts) beats a broad crawl.
 - For any plan, write that plan in a markdown document in the 'docs' directory (e.g., plan-for-A.md).
 - Break plans down into a series of steps that will provide me with opportunities to review the work so far and make changes to either the work or the plan before proceeding.
 - For any plan, also write a log file, using markdown, in 'docs'. Name the plan *-log.md (e.g., plan-for-A-log.md)
-- In the log, include the date/time, the prompt and the reasoning steps taken.
+- In the log, include the date and time, the prompt and the reasoning steps taken.
 - When implementing a plan, you may query web sites, write code in the open repository and compile and run software. You may run commands in the repository directories (rg, ls, etc.) as needed to make or carry out the plan. You may activate conda environments if needed to run tests.
 - At the end of each step of a plan, update the plan log with a time stamp and any reasoning and then wait for me to review your work.
 
