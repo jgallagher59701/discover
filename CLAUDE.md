@@ -44,6 +44,7 @@ candidates (expensive, hits real hosts) beats a broad crawl.
 - Keep edits narrowly scoped to the request.
 - If you encounter unexpected repository changes that conflict with the task, stop and ask how to proceed.
 - Do not run destructive git commands unless explicitly requested.
+- You may run python commands in a conda environment. You may run the conda.sh script and 'conda activate <env>' so long as the environment already exists on the host.
 
 ## Review Priorities
 
