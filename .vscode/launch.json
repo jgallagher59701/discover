@@ -1,0 +1,22 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python Debugger: DAP Spider with 2026.21 URLs",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "dap_spider.py", // "${file}",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "python": "/Users/jhrg/miniforge3/envs/discover/bin/python",
+            "args": "candidate_urls.2026.21.txt",
+         }
+    ]
+}
