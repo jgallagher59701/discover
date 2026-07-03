@@ -35,6 +35,8 @@ import scrapy
 from scrapy.crawler import CrawlerProcess
 
 # DAP response suffixes we may need to strip from a seed to get the base URL.
+# This is linked to the extensions used in the query to the Common Crawl database.
+# jhrg 7/3/26
 DAP_SUFFIXES = (
     ".dmr.xml", ".dmr", ".dap", ".dsr",          # DAP4
     ".dds", ".das", ".dods", ".info", ".ascii",  # DAP2
@@ -53,10 +55,15 @@ def strip_dap_suffix(url: str) -> str:
             return url[: -len(suf)]
     return url
 
+def strip_query_string(url: str) -> str:
+    """Return the dataset base URL by removing an HTML query string, if any."""
+    if "?" in url:
+        return url[:url.find("?")]
+    return url
 
 def is_thredds_catalog(url: str) -> bool:
     p = urlparse(url).path.lower()
-    return "/thredds/catalog" in p and (p.endswith(".xml") or p.endswith("/"))
+    return "/thredds/catalog" in p and (p.endswith(".html") or p.endswith(".xml") or p.endswith("/"))
 
 
 class DapSpider(scrapy.Spider):
@@ -73,8 +80,8 @@ class DapSpider(scrapy.Spider):
         "DOWNLOAD_TIMEOUT": 20,
         "RETRY_TIMES": 2,
         "USER_AGENT": (
-            "DAP-Discovery/0.1 "
-            "(+https://example.org/your-project; contact you@example.org)"
+            "OPeNDAP-Discovery/0.1 "
+            "(+https://www.opendap.org/; contact support@opendap.org)"
         ),
         # ---- output ----
         "FEEDS": {"dap_endpoints.jsonl": {"format": "jsonlines"}},
@@ -87,21 +94,26 @@ class DapSpider(scrapy.Spider):
 
     # ---- seeding & classification -------------------------------------
 
-    def start_requests(self):
+    async def start(self):
         if not self.seeds_file:
             self.logger.error("no seeds file provided")
             return
         with open(self.seeds_file, encoding="utf-8") as f:
+            self.logger.info(f"open seed file {self.seeds_file}")
             for line in f:
                 url = line.strip()
                 if not url or url.startswith("#"):
                     continue
                 if is_thredds_catalog(url):
+                    self.logger.info(f"seed [thredds catalog]: {url}")
                     yield scrapy.Request(
                         url, callback=self.parse_thredds_catalog, errback=self.on_error
                     )
                 else:
-                    yield from self.probe(strip_dap_suffix(url))
+                    base = strip_dap_suffix(url)
+                    self.logger.info(f"seed [probe]: {url} -> base {base}")
+                    for req in self.probe(base):
+                        yield req
 
     # ---- DAP probing ---------------------------------------------------
 
