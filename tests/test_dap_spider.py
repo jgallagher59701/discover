@@ -2,7 +2,7 @@ import types
 
 import pytest
 
-from conftest import make_response
+from conftest import make_response, make_xml_response
 from dap_spider import is_thredds_catalog, strip_dap_suffix, strip_query_string
 
 
@@ -278,3 +278,111 @@ def test_on_dds_non_200_yields_nothing_even_if_body_would_match(spider):
 def test_on_error_does_not_raise(spider):
     failure = types.SimpleNamespace(value=Exception("boom"))
     spider.on_error(failure)  # no assertion beyond "did not raise"
+
+
+# ---- DapSpider.parse_thredds_catalog (plan Step A3) -----------------------
+#
+# NOTE: these fixtures must be built with make_xml_response, not
+# make_response. A plain TextResponse's .selector defaults to an HTML
+# parser, under which the namespace-based XPath matching below silently
+# finds nothing (empty results, no error) regardless of whether the XML
+# uses a default or prefixed namespace. Confirmed empirically before writing
+# these tests: production Scrapy sniffs a real .xml catalog response into an
+# XmlResponse automatically, so this is a fixture-construction detail, not a
+# spider bug.
+
+CATALOG_URL = "http://example.org/thredds/catalog/catalog.xml"
+
+
+def test_parse_thredds_catalog_follows_subcatalog_ref(spider):
+    body = """<?xml version="1.0" encoding="UTF-8"?>
+<catalog xmlns="http://www.unidata.ucar.edu/namespaces/thredds/InvCatalog/v1.0"
+         xmlns:xlink="http://www.w3.org/1999/xlink">
+  <catalogRef xlink:href="sub/catalog.xml" xlink:title="Sub"/>
+</catalog>"""
+    response = make_xml_response(url=CATALOG_URL, body=body)
+    results = list(spider.parse_thredds_catalog(response))
+    assert len(results) == 1
+    assert results[0].url == "http://example.org/thredds/catalog/sub/catalog.xml"
+    assert results[0].callback == spider.parse_thredds_catalog
+
+
+@pytest.mark.parametrize("service_type", ["OPENDAP", "opendap", "OpenDAP"])
+def test_parse_thredds_catalog_matches_servicetype_case_insensitively(
+    spider, service_type
+):
+    body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<catalog xmlns="http://www.unidata.ucar.edu/namespaces/thredds/InvCatalog/v1.0">
+  <service name="odap" serviceType="{service_type}" base="/thredds/dodsC/"/>
+  <dataset name="foo" urlPath="test/foo.nc"/>
+</catalog>"""
+    response = make_xml_response(url=CATALOG_URL, body=body)
+    results = list(spider.parse_thredds_catalog(response))
+    assert len(results) == 1
+    assert results[0].url == "http://example.org/thredds/dodsC/test/foo.nc.dmr.xml"
+
+
+def test_parse_thredds_catalog_no_service_defaults_to_dodsc_prefix(spider):
+    body = """<?xml version="1.0" encoding="UTF-8"?>
+<catalog xmlns="http://www.unidata.ucar.edu/namespaces/thredds/InvCatalog/v1.0">
+  <dataset name="foo" urlPath="test/foo.nc"/>
+</catalog>"""
+    response = make_xml_response(url=CATALOG_URL, body=body)
+    results = list(spider.parse_thredds_catalog(response))
+    assert len(results) == 1
+    assert results[0].url == "http://example.org/thredds/dodsC/test/foo.nc.dmr.xml"
+
+
+def test_parse_thredds_catalog_multiple_opendap_services_probes_each(spider):
+    body = """<?xml version="1.0" encoding="UTF-8"?>
+<catalog xmlns="http://www.unidata.ucar.edu/namespaces/thredds/InvCatalog/v1.0">
+  <service name="odap1" serviceType="OPENDAP" base="/thredds/dodsC/"/>
+  <service name="odap2" serviceType="OPENDAP" base="/alt/dodsC/"/>
+  <dataset name="foo" urlPath="test/foo.nc"/>
+</catalog>"""
+    response = make_xml_response(url=CATALOG_URL, body=body)
+    results = list(spider.parse_thredds_catalog(response))
+    urls = sorted(r.url for r in results)
+    assert urls == sorted(
+        [
+            "http://example.org/thredds/dodsC/test/foo.nc.dmr.xml",
+            "http://example.org/alt/dodsC/test/foo.nc.dmr.xml",
+        ]
+    )
+
+
+def test_parse_thredds_catalog_matches_regardless_of_documents_own_prefix(spider):
+    # register_namespace binds a prefix to a URI in the *selector*, matched
+    # by URI at XPath time -- so this should work whether the source XML
+    # uses the same "t:" prefix as the code, a different prefix, or (the
+    # common case for real TDS servers) a default/unprefixed namespace, as
+    # covered by the other tests in this section. Using an unrelated prefix
+    # name here to isolate that the match is URI-based, not text-based.
+    body = """<?xml version="1.0" encoding="UTF-8"?>
+<thredds:catalog xmlns:thredds="http://www.unidata.ucar.edu/namespaces/thredds/InvCatalog/v1.0"
+                  xmlns:xlink="http://www.w3.org/1999/xlink">
+  <thredds:service name="odap" serviceType="OPENDAP" base="/thredds/dodsC/"/>
+  <thredds:dataset name="foo" urlPath="test/foo.nc"/>
+</thredds:catalog>"""
+    response = make_xml_response(url=CATALOG_URL, body=body)
+    results = list(spider.parse_thredds_catalog(response))
+    assert len(results) == 1
+    assert results[0].url == "http://example.org/thredds/dodsC/test/foo.nc.dmr.xml"
+
+
+def test_parse_thredds_catalog_html_rendered_page_yields_nothing(spider):
+    # KNOWN GAP, documented here rather than silently fixed: is_thredds_catalog
+    # classifies a "*/thredds/catalog*.html" URL as a THREDDS catalog (see
+    # test_is_thredds_catalog_true_cases), but a real THREDDS server's
+    # catalog.html is an XSLT-rendered HTML *view* of catalog.xml -- plain
+    # <a href> links, none of the InvCatalog catalogRef/service/dataset
+    # elements this parser looks for. Seeding with a "*.html" catalog URL
+    # therefore recurses into nothing, matching the "did not get crawled"
+    # catalog.html entries noted in crawls/first/notes_from_first_crawl.md
+    # (e.g. gcoos5.geos.tamu.edu/thredds/catalog/catalog.html).
+    body = """<html><body><h1>Catalog</h1><a href="foo.nc.html">foo.nc</a></body></html>"""
+    response = make_xml_response(
+        url="http://example.org/thredds/catalog/catalog.html", body=body
+    )
+    results = list(spider.parse_thredds_catalog(response))
+    assert results == []

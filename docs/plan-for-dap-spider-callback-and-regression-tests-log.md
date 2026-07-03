@@ -138,3 +138,70 @@ regression tests as outlined above."
   network access.
 - Did not touch `parse_thredds_catalog` (Step A3) or `start()` (Step A4) —
   out of scope for this step. Waiting for review before continuing.
+
+## 2026-07-03 (Step A3)
+
+**Prompt:** "run step A3."
+
+**Reasoning / actions:**
+
+- Before writing any assertions, spiked the plan's flagged risk (does
+  namespace-URI matching work against a default-namespace XML document) with
+  a throwaway script. Result: **zero matches**, not the expected pass — but
+  root cause turned out to be my own test harness, not the spider's
+  namespace-registration logic. `tests/conftest.py`'s `make_response()`
+  builds a plain `scrapy.http.TextResponse`, whose `.selector` defaults to
+  an **HTML** parser unless the response class is `XmlResponse` (Scrapy
+  picks the class via content-type/URL sniffing in production, but a
+  hand-built `TextResponse` doesn't get that treatment). Under the HTML
+  parser, namespace-based XPath silently finds nothing — no exception, just
+  an empty result list, which would have made a wrong test assertion look
+  like a passing test.
+- Confirmed with a second spike: switching the fixture to
+  `scrapy.http.XmlResponse` (still built by hand, no crawler) made the exact
+  same default-namespace body match correctly (both the `catalogRef` follow
+  and the `dataset`/`service` probe). Also confirmed separately that
+  Scrapy's real `responsetypes.from_args()` sniffs a `.xml`-suffixed URL
+  into `XmlResponse` automatically from the body/URL alone, even with no
+  Content-Type header — so real THREDDS catalog fetches in production get
+  the right parser; this was purely a test-fixture gap.
+- Added `make_xml_response()` to `tests/conftest.py` (thin wrapper around
+  `scrapy.http.XmlResponse`, mirroring `make_response()`), with a docstring
+  on both functions cross-referencing which one to use for which callback,
+  so this doesn't get rediscovered the hard way in a future test.
+- While spiking the "does it matter that the document declares its own
+  prefix vs default namespace" question, tried a second thing out of
+  caution: fed a real THREDDS **catalog.html**-shaped body (plain rendered
+  HTML with `<a href>` links, no InvCatalog namespace elements at all — this
+  is what TDS servers actually serve at `catalog.html`, an XSLT rendering of
+  `catalog.xml`, not the InvCatalog XML itself) through
+  `parse_thredds_catalog`. Result: zero requests yielded, confirmed
+  independent of parser type (same result under `XmlResponse`). This
+  directly explains the `catalog.html` entries in
+  `crawls/first/notes_from_first_crawl.md`'s "did not get crawled" list
+  (e.g. `gcoos5.geos.tamu.edu/thredds/catalog/catalog.html`,
+  `ncss.hycom.org/thredds/catalog.html`): `is_thredds_catalog` correctly
+  routes `.html` catalog URLs into `parse_thredds_catalog`, but that method
+  has nothing to find in a rendered HTML page — the miss is a real,
+  reproducible gap, not a fluke of a specific host being down. Added this as
+  `test_parse_thredds_catalog_html_rendered_page_yields_nothing`, with a
+  comment explaining the finding and its connection to the notes file,
+  rather than silently fixing it (e.g. by rewriting `.html` catalog seeds to
+  `.xml` before requesting) — that's a real behavior change for you to
+  decide on, not a test-writing task.
+- Added the rest of the planned Step A3 case list: sub-catalog `catalogRef`
+  recursion, `serviceType` case-insensitivity (`OPENDAP`/`opendap`/
+  `OpenDAP`), `dataset[@urlPath]` + service `@base` joining, the
+  no-`service`-element fallback to `/thredds/dodsC/`, multiple `OPENDAP`
+  services each getting probed, and a document using an arbitrary namespace
+  prefix (`thredds:`, not the code's own `t:`) to isolate that matching is
+  URI-based, not prefix-text-based.
+- Ran `pytest tests/ -v`: 51/51 pass (43 pre-existing + 8 new) in 0.04s, no
+  network access.
+- Flagging for your review: the `catalog.html` finding above is a genuine,
+  previously-undiagnosed root cause behind a documented crawl gap, not
+  something I'm proposing to fix as part of this testing plan. Worth a
+  separate decision on whether `is_thredds_catalog`/the seed-classification
+  logic in `start()` should rewrite `.html` catalog URLs to their `.xml`
+  counterpart before requesting.
+- Did not touch `start()` (Step A4) — waiting for review before continuing.
