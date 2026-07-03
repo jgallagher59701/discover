@@ -1,3 +1,5 @@
+import types
+
 import pytest
 
 from conftest import make_response
@@ -130,3 +132,149 @@ def test_harness_on_dmr_confirms_dap4_from_body_signature(spider):
             "server": "",
         }
     ]
+
+
+# ---- DapSpider.probe / on_dmr / on_dds (plan Step A2) ---------------------
+
+BASE = "http://example.org/data/foo"
+
+
+def test_probe_yields_single_dmr_request(spider):
+    requests = list(spider.probe(BASE))
+    assert len(requests) == 1
+    req = requests[0]
+    assert req.url == BASE + ".dmr.xml"
+    assert req.callback == spider.on_dmr
+    assert req.cb_kwargs == {"base": BASE}
+    assert req.dont_filter is True
+
+
+# -- on_dmr: DAP4 confirmation signals --
+
+
+def test_on_dmr_confirms_dap4_via_xdap_header_with_no_body_signature(spider):
+    response = make_response(
+        url=BASE + ".dmr.xml", body="not a real body", headers={"XDAP": b"4.0"}
+    )
+    results = list(spider.on_dmr(response, base=BASE))
+    assert results == [
+        {
+            "url": BASE,
+            "dap_version": "4",
+            "probe_url": BASE + ".dmr.xml",
+            "xdap": "4.0",
+            "server": "",
+        }
+    ]
+
+
+def test_on_dmr_confirms_dap4_via_dapversion_in_body(spider):
+    response = make_response(url=BASE + ".dmr.xml", body="<Dataset dapVersion='4.0'>")
+    results = list(spider.on_dmr(response, base=BASE))
+    assert len(results) == 1
+    assert results[0]["dap_version"] == "4"
+
+
+def test_on_dmr_includes_server_header_when_present(spider):
+    response = make_response(
+        url=BASE + ".dmr.xml",
+        body="DAP/4.0",
+        headers={"Server": b"Hyrax/1.17.1"},
+    )
+    results = list(spider.on_dmr(response, base=BASE))
+    assert results[0]["server"] == "Hyrax/1.17.1"
+
+
+def test_on_dmr_missing_headers_decode_to_empty_string_not_error(spider):
+    response = make_response(url=BASE + ".dmr.xml", body="DAP/4.0")
+    results = list(spider.on_dmr(response, base=BASE))
+    assert results[0]["xdap"] == ""
+    assert results[0]["server"] == ""
+
+
+# -- on_dmr: falls through to DAP2 probe --
+
+
+def test_on_dmr_no_signature_falls_through_to_dds_request(spider):
+    response = make_response(url=BASE + ".dmr.xml", body="<html>not dap</html>")
+    results = list(spider.on_dmr(response, base=BASE))
+    assert len(results) == 1
+    req = results[0]
+    assert req.url == BASE + ".dds"
+    assert req.callback == spider.on_dds
+    assert req.cb_kwargs == {"base": BASE}
+    assert req.dont_filter is True
+
+
+def test_on_dmr_non_200_falls_through_to_dds_even_if_body_would_match(spider):
+    # status check short-circuits the "and" before the body/header check, so
+    # a non-200 response falls through to the DAP2 attempt regardless of
+    # whether the body looks like a DAP4 signature.
+    response = make_response(url=BASE + ".dmr.xml", body="DAP/4.0", status=404)
+    results = list(spider.on_dmr(response, base=BASE))
+    assert len(results) == 1
+    assert results[0].url == BASE + ".dds"
+
+
+# -- on_dds: DAP2 confirmation signals --
+
+
+def test_on_dds_confirms_dap2_via_body_signature(spider):
+    response = make_response(url=BASE + ".dds", body="Dataset {\n  Float64 x;\n}")
+    results = list(spider.on_dds(response, base=BASE))
+    assert results == [
+        {
+            "url": BASE,
+            "dap_version": "2",
+            "probe_url": BASE + ".dds",
+            "xdods_server": "",
+            "server": "",
+        }
+    ]
+
+
+def test_on_dds_confirms_dap2_via_xdods_header_alone(spider):
+    response = make_response(
+        url=BASE + ".dds", body="not a dds body", headers={"XDODS-Server": b"dods/3.7"}
+    )
+    results = list(spider.on_dds(response, base=BASE))
+    assert len(results) == 1
+    assert results[0]["xdods_server"] == "dods/3.7"
+
+
+def test_on_dds_confirms_dap2_via_content_description_case_insensitive(spider):
+    response = make_response(
+        url=BASE + ".dds",
+        body="not a dds body",
+        headers={"Content-Description": b"DODS-DDS"},
+    )
+    results = list(spider.on_dds(response, base=BASE))
+    assert len(results) == 1
+
+
+def test_on_dds_tolerates_leading_whitespace_before_signature(spider):
+    response = make_response(url=BASE + ".dds", body="   \n  Dataset {\n}")
+    results = list(spider.on_dds(response, base=BASE))
+    assert len(results) == 1
+
+
+def test_on_dds_no_signal_yields_nothing(spider):
+    response = make_response(url=BASE + ".dds", body="<html>404-ish page</html>")
+    results = list(spider.on_dds(response, base=BASE))
+    assert results == []
+
+
+def test_on_dds_non_200_yields_nothing_even_if_body_would_match(spider):
+    response = make_response(
+        url=BASE + ".dds", body="Dataset {\n}", status=500
+    )
+    results = list(spider.on_dds(response, base=BASE))
+    assert results == []
+
+
+# -- on_error: never raises --
+
+
+def test_on_error_does_not_raise(spider):
+    failure = types.SimpleNamespace(value=Exception("boom"))
+    spider.on_error(failure)  # no assertion beyond "did not raise"

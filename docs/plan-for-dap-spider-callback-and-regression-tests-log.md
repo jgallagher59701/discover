@@ -108,3 +108,33 @@ regression tests as outlined above."
 - Did not proceed to Steps A2-A4 — Step A1 was scoped as the harness spike
   only, per the plan's "gate everything else in Part A" framing. Waiting for
   review before continuing.
+
+## 2026-07-03 (Step A2)
+
+**Prompt:** "Run step A2."
+
+**Reasoning / actions:**
+
+- Added the full `probe`/`on_dmr`/`on_dds`/`on_error` case list from the
+  plan to `tests/test_dap_spider.py`, reusing the `spider` fixture and
+  `make_response()` helper from Step A1 — no new fixtures needed.
+- Covered: `probe()`'s single `Request` (url, callback, cb_kwargs,
+  `dont_filter`); all three DAP4 confirmation signals for `on_dmr`
+  (body `"DAP/4.0"`, `XDAP` header, `"dapVersion"` in body — the first
+  already had a Step A1 spike test, so only the other two plus header/server
+  field checks were added here); the DAP4-to-DAP2 fallback `Request`; the
+  non-200-short-circuit case; all three DAP2 confirmation signals for
+  `on_dds` (body signature, `XDODS-Server` header alone, `Content-
+  Description` case-insensitive substring); DAP2's no-fallback terminal
+  behavior on no-signal and non-200; leading-whitespace tolerance; and
+  `on_error` never raising.
+- Explicitly tested the non-200 short-circuit noted as a risk in the plan
+  (`response.status == 200 and (...)` short-circuits before checking body
+  content) for both `on_dmr` and `on_dds` — confirmed current behavior
+  matches the plan's prediction: a 404/500 with a signature-matching body
+  still falls through/returns nothing exactly as the boolean logic implies.
+  No surprises, so nothing flagged for a design decision here.
+- Ran `pytest tests/ -v`: 43/43 pass (29 pre-existing + 14 new) in 0.03s, no
+  network access.
+- Did not touch `parse_thredds_catalog` (Step A3) or `start()` (Step A4) —
+  out of scope for this step. Waiting for review before continuing.
