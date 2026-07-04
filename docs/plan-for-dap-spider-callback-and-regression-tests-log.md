@@ -239,3 +239,79 @@ regression tests as outlined above."
   selecting and freezing a small seed list — which needs your input on
   which specific URLs to pick, per the plan's review point. Waiting for
   direction before proceeding to B1.
+
+## 2026-07-04 (Step B1)
+
+**Prompt:** "run the step B1 from the plan."
+
+**Reasoning / actions:**
+
+- Searched `crawls/first/candidate_urls*.txt` and `dap_endpoints.jsonl` for
+  concrete, real examples of each category the plan called for, rather than
+  writing synthetic-looking URLs:
+  - Confirmed-true-positive DAP4: `test.opendap.org` Hyrax entry (already
+    known from earlier steps).
+  - Confirmed-true-positive DAP2: initially looked for a query-string-free
+    ERDDAP entry to isolate "does confirmation work" from "does the
+    query-string bug matter" -- found there's exactly **one** no-query
+    confirmed DAP2 entry in the whole 821-line `dap_endpoints.jsonl`, and it
+    doesn't exist (the grep for `dap_version 2` with no `?` in the url
+    returned nothing) -- real ERDDAP dataset URLs harvested from Common
+    Crawl essentially always carry a query string, so a "clean" example
+    isn't available from real data. Picked a real dataset `.graph` request
+    (`gcoos4.geos.tamu.edu/.../CAGES_Alabama.graph?...`) instead of an
+    `index.*` listing page, to keep it distinct from the deliberately
+    query-string-focused entry below.
+  - The dead-`strip_query_string` demonstration: the
+    `erddap.dataexplorer.oceanobservatories.org/.../allDatasets.html?...`
+    entry already used in the plan's findings section.
+  - Found an unplanned fifth category while scanning `dap_endpoints.jsonl`
+    for query-string patterns: an `apdrc.soest.hawaii.edu/.../index.json`
+    entry whose recorded `probe_url` is **identical** to its `url` -- no
+    `.dds` suffix appears anywhere in the confirmed record, unlike every
+    other DAP2 entry. This doesn't fit the "suffix glued after query string"
+    explanation (that still results in a suffix appearing, just in the
+    wrong place); a URL with literally no trace of the probe suffix having
+    been appended suggests either a redirect back to the canonical URL, or
+    ERDDAP stamping `XDODS-Server: dods/3.7` on non-dataset "index" listing
+    responses regardless of path -- i.e. a possible false positive our
+    confirmation logic wouldn't catch. Flagged this explicitly rather than
+    guessing at the mechanism; Step B2's actual capture will show which it
+    is.
+  - `.html`-suffixed `dodsC` gap: two `pae-paha.pacioos.hawaii.edu` seeds
+    already known from `notes_from_first_crawl.md`.
+  - `catalog.html`-is-not-XML gap (root-caused in Step A3): one plain
+    example (`gcoos5.geos.tamu.edu`) and one with a query string
+    (`sgbd.acmad.org`) to confirm the miss is about the `.html` rendering,
+    not the query string -- `is_thredds_catalog` already strips query
+    strings via `urlparse` before its path check, so this is really a
+    "confirm my A3 root-cause theory generalizes" test, not a new unknown.
+  - `alexporn.org/tags/dap/`: confirmed via grep that this seed is genuinely
+    absent from `dap_endpoints.jsonl`, i.e. the *real* 2026.21 crawl already
+    validates today's spider correctly ignores it -- this fixture pins that
+    down permanently rather than relying on it having been true once.
+  - Found a second, differently-shaped false positive while scanning for
+    other regex-fooling hosts: `wcs.hycom.org/thredds/view/idv.jnlp?
+    url=http://tds.hycom.org/thredds/dodsC/...` -- the real `dodsC` URL is
+    embedded in a query *parameter* of an unrelated IDV-viewer launch page,
+    not the page itself. Added it as a second, distinct false-positive shape
+    (regex-matches-content-of-an-unrelated-page vs. regex-matches-because-
+    the-word-"dap"-appears-in-an-unrelated-word).
+- Kept the list to 10 URLs rather than the plan's estimated 20-30 -- once
+  each identified category had one or two clean, real examples, additional
+  URLs would have been same-shaped duplicates rather than new coverage.
+  Noted this explicitly in the fixture file's own header comment so it
+  doesn't read as an oversight later.
+- Wrote the frozen list to `tests/fixtures/regression_seeds.txt`, with a
+  `#`-comment above each URL explaining why it's there (matches
+  `dap_spider.py`'s own comment-skipping seed-file format, so the file can
+  double as a literal seed file for an optional manual live run later, per
+  Step B4).
+- Dry-ran the seed file through `DapSpider.start()` directly (via
+  `asyncio.run`) to confirm each line classifies the way its comment claims
+  -- 8 seeds route to `probe()`, 2 to `parse_thredds_catalog`, all URLs
+  transformed exactly as expected. This only builds `Request` objects, never
+  executes them -- no network access.
+- Did **not** proceed to Step B2 (the actual one-time capture) -- that's the
+  explicit review gate. Waiting for you to review the URL list (and swap in
+  anything you'd rather use instead) before any real host gets hit.

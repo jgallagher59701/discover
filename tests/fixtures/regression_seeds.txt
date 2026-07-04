@@ -1,0 +1,64 @@
+# Frozen regression seed list -- plan Step B1
+# (docs/plan-for-dap-spider-callback-and-regression-tests.md)
+#
+# Hand-picked from crawls/first/*.txt, cross-referenced against
+# crawls/first/dap_endpoints.jsonl (a real Stage-2 run's output) and
+# crawls/first/notes_from_first_crawl.md. Not a random sample -- each URL
+# below earns its place for a specific reason (see comment above it).
+#
+# This file is deliberately small (10 URLs, not the 20-30 the plan
+# estimated) -- once each category below had one or two clean examples,
+# additional URLs would just be same-shaped duplicates, not new coverage.
+# Comment format matches dap_spider.py's own seed-file parsing (#-prefixed
+# lines skipped), so this file can also be fed to dap_spider.py directly for
+# a manual live smoke run if wanted.
+#
+# NOTHING IN THIS FILE HAS BEEN FETCHED YET. Step B2 (one-time capture) is
+# the step that actually hits these hosts -- still pending your review of
+# this list first.
+
+# --- confirmed true positive: DAP4, Hyrax, clean body+header signal ---
+# (dap_endpoints.jsonl: dap_version 4, server "Hyrax/1.17.1-1440-test-deploy")
+http://test.opendap.org:8080/opendap/data/nc/fnoc1.nc.dmr
+
+# --- confirmed true positive: real ERDDAP dataset access, DAP2 via XDODS-Server header ---
+https://gcoos4.geos.tamu.edu/erddap/tabledap/CAGES_Alabama.graph?longitude,latitude,time&.draw=markers&.marker=5%7C5&.color=0x000000&.colorBar=%7CD%7C%7C%7C%7C&.bgColor=0xffccccff&.click=
+
+# --- confirmed true positive, AND demonstrates the dead strip_query_string finding: ---
+# dap_endpoints.jsonl shows probe_url "...&distinct().dds" -- the DAP suffix
+# glued on after the query string, not as a real extension. Still worked
+# against this (lenient) ERDDAP server.
+https://erddap.dataexplorer.oceanobservatories.org/erddap/tabledap/allDatasets.html?accessible,dataStructure,cdm_data_type,class,institution,testOutOfDate&distinct()
+
+# --- confirmed true positive, but SUSPICIOUS: worth checking the real capture ---
+# dap_endpoints.jsonl's probe_url for this seed is IDENTICAL to its url --
+# no ".dds" ever shows up appended, unlike every other confirmed entry.
+# Possible explanations to check once we have the real response in hand:
+# a redirect back to the canonical URL, or ERDDAP stamping XDODS-Server on
+# non-dataset "index" listing pages regardless of path. If the latter, this
+# is a false positive our confirmation logic doesn't catch.
+http://apdrc.soest.hawaii.edu/erddap/griddap/index.json?page=1&itemsPerPage=1000
+
+# --- known gap: .html-suffixed dodsC URL, not in DAP_SUFFIXES so never stripped ---
+# (notes_from_first_crawl.md lists these under "did not get crawled")
+https://pae-paha.pacioos.hawaii.edu/thredds/dodsC/hmrg_bathytopo_50m_mhi.html
+https://pae-paha.pacioos.hawaii.edu/thredds/dodsC/neowave_nawiliwili.html
+
+# --- known gap: catalog.html is a rendered HTML view, not InvCatalog XML ---
+# (root-caused in Step A3's test_parse_thredds_catalog_html_rendered_page_yields_nothing;
+# notes_from_first_crawl.md lists this host under "did not get crawled")
+https://gcoos5.geos.tamu.edu/thredds/catalog/catalog.html
+
+# --- same gap, with a query string, to confirm the miss isn't query-string-related ---
+http://sgbd.acmad.org:8080/thredds/catalog/ACMAD/WWFD/forecastinservice/ensemble5/2022/202201/20220104/catalog.html?dataset=ACMAD/WWFD/forecastinservice/ensemble5/2022/202201/20220104/ARP20220104_48.png
+
+# --- regex false positive: matches on the literal substring "dap" in the URL, ---
+# not a DAP host at all. Already confirmed absent from dap_endpoints.jsonl
+# (the real 2026.21 crawl correctly found nothing here).
+http://alexporn.org/tags/dap/
+
+# --- regex false positive, different shape: the actual dodsC URL is embedded ---
+# in a query PARAMETER of an unrelated IDV-viewer launch page (.jnlp), not
+# the page itself. Demonstrates why Stage 1's cheap regex match needs Stage
+# 2 verification even on "real" institutional hosts.
+http://wcs.hycom.org/thredds/view/idv.jnlp?url=http://tds.hycom.org/thredds/dodsC/ESPC-D-V02/Sssh
