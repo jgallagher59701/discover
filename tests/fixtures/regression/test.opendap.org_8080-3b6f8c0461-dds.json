@@ -1,0 +1,22 @@
+{
+  "body": "Dataset {\n    Int16 u[time_a = 16][lat = 17][lon = 21];\n    Int16 v[time_a = 16][lat = 17][lon = 21];\n    Float32 lat[lat = 17];\n    Float32 lon[lon = 21];\n    Float32 time[time = 16];\n} fnoc1.nc;\n",
+  "body_truncated": false,
+  "headers": {
+    "Connection": "close",
+    "Content-Description": "dods_dds",
+    "Content-Type": "text/plain",
+    "Date": "Sat, 04 Jul 2026 07:59:58 GMT",
+    "Last-Modified": "Thu, 23 Sep 2021 19:45:14 GMT",
+    "Server": "Hyrax/1.17.1-1440-test-deploy",
+    "Transfer-Encoding": "chunked",
+    "X-DAP": "3.2",
+    "X-FRAME-OPTIONS": "DENY",
+    "XDODS-Server": "dods/3.2",
+    "XOPeNDAP-Server": "asciival/, bes/, csv_handler/, dapreader_module/, dmrpp_module/, fileout_covjson/, fileout_json/, fileout_netcdf/, freeform_handler/, functions/, gateway/, gdal_module/, hdf4_handler/, hdf5_handler/, libdap/, netcdf_handler/, s3_reader/, usage/, xml_data_handler/",
+    "vary": "accept-encoding"
+  },
+  "kind": "dds",
+  "seed": "http://test.opendap.org:8080/opendap/data/nc/fnoc1.nc.dmr",
+  "status": 200,
+  "url": "http://test.opendap.org:8080/opendap/data/nc/fnoc1.nc.dds"
+}

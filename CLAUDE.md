@@ -58,8 +58,14 @@ When asked to review, prioritize:
 ## Environment & commands
 
 ```bash
-conda create -n discover duckdb scrapy   # or: conda activate discover
-# equivalently: pip install -r requirements.txt   (duckdb, scrapy)
+conda create -n discover duckdb scrapy pytest  
+# or: conda activate discover
+# equivalently: pip install -r requirements.txt   (duckdb, scrapy, pytest)
+```
+
+To run the commands, activate the 'discover' conda env:
+```bash
+/Users/jhrg/miniforge3/etc/profile.d/conda.sh && conda activate discover
 ```
 
 Stage 1 — mine Common Crawl (no network access to target hosts, only to S3):

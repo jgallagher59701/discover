@@ -3,7 +3,7 @@ import types
 
 import pytest
 
-from conftest import make_response, make_xml_response
+from conftest import load_captured_response, make_response, make_xml_response
 from dap_spider import is_thredds_catalog, strip_dap_suffix, strip_query_string
 
 
@@ -234,29 +234,72 @@ def test_on_dds_confirms_dap2_via_body_signature(spider):
     ]
 
 
-def test_on_dds_confirms_dap2_via_xdods_header_alone(spider):
+def test_on_dds_xdods_header_alone_is_not_sufficient(spider):
+    # Regression test for a real false positive found via
+    # tests/fixtures/regression/ captures (plan Step B2): some ERDDAP hosts
+    # stamp XDODS-Server on ordinary UI pages (index listings, "Make A
+    # Graph" forms), not just genuine DDS responses, so the header alone
+    # must not be enough to confirm a DAP2 endpoint.
     response = make_response(
         url=BASE + ".dds", body="not a dds body", headers={"XDODS-Server": b"dods/3.7"}
+    )
+    results = list(spider.on_dds(response, base=BASE))
+    assert results == []
+
+
+def test_on_dds_records_xdods_header_when_body_signature_present(spider):
+    response = make_response(
+        url=BASE + ".dds",
+        body="Dataset {\n  Float64 x;\n}",
+        headers={"XDODS-Server": b"dods/3.7"},
     )
     results = list(spider.on_dds(response, base=BASE))
     assert len(results) == 1
     assert results[0]["xdods_server"] == "dods/3.7"
 
 
-def test_on_dds_confirms_dap2_via_content_description_case_insensitive(spider):
-    response = make_response(
-        url=BASE + ".dds",
-        body="not a dds body",
-        headers={"Content-Description": b"DODS-DDS"},
-    )
-    results = list(spider.on_dds(response, base=BASE))
-    assert len(results) == 1
-
-
 def test_on_dds_tolerates_leading_whitespace_before_signature(spider):
     response = make_response(url=BASE + ".dds", body="   \n  Dataset {\n}")
     results = list(spider.on_dds(response, base=BASE))
     assert len(results) == 1
+
+
+# -- on_dds: real-world regression fixtures (Step B2 capture) --
+#
+# These replay actual captured responses from tests/fixtures/regression/
+# (see tests/tools/capture_fixtures.py) rather than hand-written bodies, to
+# prove the fix above against the real false positive it was written for,
+# and that it doesn't regress the one real true positive on hand.
+
+
+@pytest.mark.parametrize(
+    "slug",
+    [
+        "apdrc.soest.hawaii.edu-dcfb75a117-dds",
+        "gcoos4.geos.tamu.edu-0e988be706-dds",
+        "erddap.dataexplorer.oceanobservatories.org-103982f1c3-dds",
+    ],
+)
+def test_on_dds_rejects_real_erddap_ui_pages_that_carry_xdods_header(spider, slug):
+    # None of these three real captures is actual DDS content -- they're
+    # ERDDAP's own UI pages (a dataset-listing table, a "Make A Graph" form,
+    # a "Data Access Form") -- but all three carry XDODS-Server regardless.
+    # Before the fix, header presence alone confirmed all three as
+    # false-positive "DAP2 endpoints".
+    response, _ = load_captured_response(slug)
+    results = list(spider.on_dds(response, base="http://example.org/irrelevant-base"))
+    assert results == []
+
+
+def test_on_dds_still_confirms_real_hyrax_true_positive(spider):
+    response, _ = load_captured_response("test.opendap.org_8080-3b6f8c0461-dds")
+    results = list(
+        spider.on_dds(
+            response, base="http://test.opendap.org:8080/opendap/data/nc/fnoc1.nc"
+        )
+    )
+    assert len(results) == 1
+    assert results[0]["dap_version"] == "2"
 
 
 def test_on_dds_no_signal_yields_nothing(spider):

@@ -1,0 +1,17 @@
+{
+  "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n<!-- JNLP File for Integrated Data Viewer -->\r\n<jnlp spec=\"1.0+\" codebase=\"http://www.unidata.ucar.edu/software/idv/current/webstart/\">\r\n  <information>\r\n    <title>Integrated Data Viewer</title>\r\n    <vendor>Unidata</vendor>\r\n    <homepage href=\"https://www.unidata.ucar.edu/software/idv/index.html\"/>\r\n    <description>Integrated Data Viewer (IDV)</description>\r\n    <description kind=\"short\">A tool for geoscientific analysis and visualization.\r\n    </description>\r\n    <icon href=\"IDV/idv.gif\"/>\r\n    <offline-allowed/>\r\n  </information>\r\n\r\n  <resources>\r\n    <j2se version=\"1.6+\" max-heap-size=\"1024m\" java-vm-args=\"-XX:MaxPermSize=128m\"/>\r\n    <jar href=\"IDV/idv.jar\"/>\r\n    <extension name=\"IDV Base\" href=\"IDV/idvbase.jnlp\"/>\r\n  </resources>\r\n  <resources os=\"Linux\">\r\n    <property name=\"j3d.sharedctx\" value=\"false\"/>\r\n  </resources>\r\n\r\n  <application-desc main-class=\"ucar.unidata.idv.DefaultIdv\">\r\n    <argument>-data</argument>\r\n    <argument>type:opendap.grid:http://tds.hycom.org/thredds/dodsC/ESPC-D-V02/Sssh.dds</argument>\r\n    <argument>-oneinstanceport</argument>\r\n    <argument>14445</argument>\r\n  </application-desc>\r\n\r\n  <application-desc main-class=\"ucar.unidata.idv.DefaultIdv\"/>\r\n  <security>\r\n    <all-permissions/>\r\n  </security>\r\n\r\n</jnlp>",
+  "body_truncated": false,
+  "headers": {
+    "Connection": "close",
+    "Content-Type": "application/x-java-jnlp-file",
+    "Date": "Sat, 04 Jul 2026 08:00:52 GMT",
+    "Server": "Apache",
+    "Transfer-Encoding": "chunked",
+    "X-Frame-Options": "SAMEORIGIN",
+    "X-XSS-Protection": "1;"
+  },
+  "kind": "dds",
+  "seed": "http://wcs.hycom.org/thredds/view/idv.jnlp?url=http://tds.hycom.org/thredds/dodsC/ESPC-D-V02/Sssh",
+  "status": 200,
+  "url": "http://wcs.hycom.org/thredds/view/idv.jnlp?url=http://tds.hycom.org/thredds/dodsC/ESPC-D-V02/Sssh.dds"
+}

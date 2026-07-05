@@ -1,0 +1,17 @@
+{
+  "body": "Error {\n    code = 400;\n    message = \"Unrecognized request\";\n};\n",
+  "body_truncated": false,
+  "headers": {
+    "Access-Control-Allow-Origin": "*",
+    "Connection": "close",
+    "Content-Description": "dods-error",
+    "Content-Type": "text/plain",
+    "Date": "Sat, 04 Jul 2026 08:00:30 GMT",
+    "Server": "Apache/2.4.29 (Ubuntu)",
+    "Transfer-Encoding": "chunked"
+  },
+  "kind": "dmr",
+  "seed": "https://pae-paha.pacioos.hawaii.edu/thredds/dodsC/neowave_nawiliwili.html",
+  "status": 400,
+  "url": "https://pae-paha.pacioos.hawaii.edu/thredds/dodsC/neowave_nawiliwili.html.dmr.xml"
+}

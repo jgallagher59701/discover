@@ -315,3 +315,166 @@ regression tests as outlined above."
 - Did **not** proceed to Step B2 (the actual one-time capture) -- that's the
   explicit review gate. Waiting for you to review the URL list (and swap in
   anything you'd rather use instead) before any real host gets hit.
+
+## 2026-07-04 (Step B2)
+
+**Prompt:** "Do step B2."
+
+**Reasoning / actions:**
+
+- Treated "do step B2" (given immediately after you'd seen the exact 10-URL
+  list and the review-gate question) as authorization for the specific,
+  already-previewed action: fetching those 10 seeds' probe URLs once and
+  committing the results. Did not re-ask before fetching; did flag results
+  clearly afterward per the plan's stated review point about committing
+  captured bodies.
+- Built `tests/tools/capture_fixtures.py`: reads
+  `tests/fixtures/regression_seeds.txt`, reuses `is_thredds_catalog`/
+  `strip_dap_suffix` from `dap_spider.py` to replicate exactly which URL(s)
+  `DapSpider.start()`/`probe()` would request for each seed (catalog seeds:
+  the seed itself; probe seeds: both `<base>.dmr.xml` and `<base>.dds`, so
+  B3 has real data for both branches regardless of which one a live crawl
+  would have stopped at), and writes each response to
+  `tests/fixtures/regression/<slug>.json`. Uses `urllib` directly (no
+  Scrapy runtime) but matches `dap_spider.py`'s own politeness posture: a
+  `urllib.robotparser` check per host before fetching, the project's real
+  `USER_AGENT` string, and the same 2.0s delay between requests. Not part of
+  `pytest`/CI -- confirmed it isn't picked up by `pytest --collect-only`
+  after adding it (lives in `tests/tools/`, not matching `test_*.py`).
+- Ran it: 10 seeds -> 18 requests (8 probe seeds x 2 + 2 catalog seeds x 1),
+  all succeeded (no robots.txt blocks, no timeouts), ~40s wall time from the
+  politeness delay alone.
+- **Found a fidelity problem with my own script**, not the spider: three
+  real ERDDAP responses came back at 96KB, 158KB, and 184KB (full rendered
+  HTML/JSON pages), not the small DAP metadata documents the plan's review
+  point assumed ("sizes should be small... not data payloads"). Since
+  `on_dmr`/`on_dds` only ever inspect `response.text[:1000]` /
+  `.lstrip()[:200]`, storing the full bodies added no fidelity and would
+  have bloated the repo. Added a `TRUNCATE_BODY_AT = 4096` truncation
+  (10x the largest window either callback reads) to the capture script
+  itself, applied only to `dmr`/`dds` kinds -- explicitly NOT to `catalog`
+  fixtures, since `parse_thredds_catalog` parses the *entire* document via
+  its selector, and truncating an HTML/XML document into a byte-arbitrary
+  fragment could misrepresent real parsing behavior (unlike a body-prefix
+  signature check, which is truncation-safe by construction). Caught one
+  case where an earlier ad-hoc truncation pass (done before I'd separated
+  the catalog/non-catalog logic) had truncated the `gcoos5.geos.tamu.edu`
+  catalog fixture too -- re-fetched that single URL (one extra polite
+  request, not a full re-run) to restore it at full fidelity. Final fixture
+  directory: 108K across 18 files, all captured bodies either complete or
+  truncated only where truncation is provably lossless for how the code
+  reads them.
+- **Significant finding, well beyond what Step B1 anticipated**: inspected
+  the actual headers/bodies of the three "confirmed" ERDDAP captures
+  (`apdrc.soest.hawaii.edu` index.json, `gcoos4.geos.tamu.edu`
+  CAGES_Alabama.graph, `erddap.dataexplorer.oceanobservatories.org`
+  allDatasets.html). All three bodies are plainly *not* dataset data --
+  they're ERDDAP's own UI pages (a JSON dataset-listing table, a "Make A
+  Graph" form page, a "Data Access Form" page) -- yet **all three carry
+  `XDODS-Server: dods/3.7`** on both their `.dmr.xml` and `.dds` probe
+  responses regardless. `on_dds`'s confirmation logic treats the
+  `XDODS-Server` header *alone* as sufficient (`xdods` truthy, independent
+  of body content), so all three get confirmed as "DAP2 endpoints" purely
+  because they're served by ERDDAP -- not because the requested URL is a
+  real dataset. This isn't limited to the one URL Step B1 flagged as
+  suspicious (`index.json`); it reproduced identically on a real dataset's
+  `.graph` page and the query-string-mangled `allDatasets.html` seed too.
+  Since 820 of the 821 entries in the existing `crawls/first/
+  dap_endpoints.jsonl` production run are ERDDAP-flavored, this raises a
+  real question about how many of those are genuine dataset confirmations
+  versus "any 200-status URL under this ERDDAP host got the header too."
+  Not fixed -- this is squarely a finding to bring to you, not a
+  test-writing decision, but it's the most consequential thing this testing
+  effort has surfaced so far.
+- Confirmed the Step A3 `catalog.html`-is-not-XML theory against real data:
+  neither the `gcoos5.geos.tamu.edu` nor the `sgbd.acmad.org` real captured
+  catalog page contains `catalogRef`, `urlPath`, or `serviceType` anywhere
+  in the body -- the miss is real and reproducible, not a fixture artifact.
+- Confirmed the `.html`-suffixed `dodsC` gap manifests as a **200 status
+  with an empty body** for `.dds` (and a 400 `dods-error` for `.dmr.xml`) --
+  a false *negative* (missed detection), not a false positive: benign
+  compared to the ERDDAP finding above, but pins down exactly how the miss
+  looks on the wire.
+- Confirmed `test.opendap.org` (Hyrax) is a clean, unambiguous true
+  positive -- real `DAP/4.0`/`Dataset {` body signatures, not just a shared
+  header -- and both false-positive candidates (`alexporn.org`: 404 on both
+  probes; `wcs.hycom.org`'s `.jnlp`: 200 but no DAP signal in header or
+  body) are correctly *not* confirmed by current logic.
+- Did not touch `dap_spider.py` itself and did not re-run `cc_dap_discover.py`
+  or the full crawl -- this step only captures and inspects fixtures.
+- Next is Step B3 (replay these fixtures as offline regression tests), but
+  given the ERDDAP header finding above, I'd like your direction on whether
+  B3 should (a) just pin down today's behavior as-is (including the false
+  positive, documented like the Step A3 findings were), or (b) whether you
+  want to discuss a fix to `on_dds`'s confirmation logic first -- that would
+  change what "correct" means for the B3 assertions.
+
+## 2026-07-05 (out-of-plan: fix the on_dds false positive)
+
+**Prompt:** "Fix the on_dds false positive behavior."
+
+**Reasoning / actions:**
+
+- This is a direct code fix, not a plan step, but logged here for
+  continuity since it's a direct consequence of the Step B2 finding.
+- `on_dds` previously confirmed on `body.startswith("Dataset {") or xdods or
+  "dods" in desc.lower()` -- any one of the three sufficient alone. The
+  Step B2 captures showed `XDODS-Server` present on real ERDDAP UI pages
+  (not dataset responses), so header presence alone isn't a trustworthy
+  signal on its own for at least some real hosts.
+- Fix: require the body signature (`body.startswith("Dataset {")`) as the
+  sole confirmation condition; `XDODS-Server` is still read and included in
+  the output record (`xdods_server` field), just no longer treated as
+  sufficient on its own. Dropped the `Content-Description` check entirely
+  rather than keep it as a second, equally-untrustworthy alternate path --
+  it had the same "header alone confirms" shape as `XDODS-Server` and no
+  captured evidence distinguishes it as more reliable.
+- Considered requiring `XDODS-Server`/header presence as well (AND instead
+  of dropping to body-only), matching CLAUDE.md's documented description of
+  the confirmation logic ("header or body alone is not trusted"). Rejected:
+  the real captured Hyrax DAP4 response has no `XDAP` header at all (empty
+  string) and still confirms correctly via body signature alone in
+  `on_dmr` -- the documented "both required" design doesn't match how the
+  real servers on hand behave, and enforcing it in `on_dds` would risk
+  rejecting genuine responses from servers that don't set
+  `XDODS-Server`/`Content-Description`. The body signature (`"Dataset {"`)
+  is the one signal that's both structurally guaranteed by the DAP2 spec
+  and absent from every real false-positive capture on hand, so it's the
+  correct sole requirement here.
+- Scoped narrowly to `on_dds`, per the request -- did NOT touch `on_dmr`,
+  which has a structurally similar OR-of-header-or-body pattern
+  (`"DAP/4.0" in body or xdap.startswith("4") or "dapVersion" in body`).
+  Worth flagging: nothing in the Step B2 captures showed this causing a
+  problem for DAP4/Hyrax specifically, but the *shape* of the risk (a
+  header-only branch on a server that stamps that header broadly) is the
+  same. Not fixing preemptively without evidence, per change-discipline --
+  flagging for a separate decision if you want it looked at.
+- Updated `tests/test_dap_spider.py` for the new behavior:
+  `test_on_dds_confirms_dap2_via_xdods_header_alone` renamed to
+  `test_on_dds_xdods_header_alone_is_not_sufficient` and inverted to assert
+  `results == []`; `test_on_dds_confirms_dap2_via_content_description_case_insensitive`
+  removed (the checked behavior no longer exists); added
+  `test_on_dds_records_xdods_header_when_body_signature_present` to confirm
+  the header is still captured in output when present alongside a real body
+  match (i.e. it's supplementary metadata now, not a confirmation path).
+- Added real-world regression coverage pulled forward from Step B3, scoped
+  to what this fix touches: `test_on_dds_rejects_real_erddap_ui_pages_that_carry_xdods_header`
+  replays all three real captured ERDDAP false-positive responses from
+  Step B2 (`apdrc.soest.hawaii.edu` index.json, `gcoos4.geos.tamu.edu`
+  CAGES_Alabama.graph, `erddap.dataexplorer.oceanobservatories.org`
+  allDatasets.html) via a new `load_captured_response()` helper in
+  `conftest.py`, and asserts each now yields nothing.
+  `test_on_dds_still_confirms_real_hyrax_true_positive` replays the real
+  Hyrax `.dds` capture to prove the fix doesn't regress the one genuine
+  true positive on hand. This is not the full Step B3 (catalog fixtures,
+  false-positive fixtures unrelated to `on_dds`, etc. are still pending) --
+  only the fixtures directly relevant to proving this specific fix.
+- Ran `pytest tests/ -v`: 60/60 pass (56 pre-existing, with 2 rewritten +
+  1 removed + 5 new) in 0.05s, no network access.
+- **Not done, and flagging explicitly:** `crawls/first/dap_endpoints.jsonl`
+  is production output from *before* this fix and is now stale relative to
+  `dap_spider.py` -- most of its 820 ERDDAP entries were likely confirmed
+  via the header-alone path this fix removes. Did not re-run the full
+  crawl (multi-hour, hits real hosts) as part of this fix -- that's a
+  separate decision for you, not something to do silently as a side effect
+  of a bug fix.

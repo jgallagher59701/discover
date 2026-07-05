@@ -151,12 +151,14 @@ class DapSpider(scrapy.Spider):
         )
 
     def on_dds(self, response, base):
+        # The body signature is required, not just a supporting signal: some
+        # ERDDAP hosts stamp XDODS-Server/Content-Description on ordinary UI
+        # pages (index listings, "Make A Graph" forms), not just genuine DDS
+        # responses, so header/description alone are not trustworthy enough
+        # to confirm on their own. jhrg 7/5/26
         body = response.text.lstrip()[:200]
         xdods = response.headers.get("XDODS-Server", b"").decode("latin1")
-        desc = response.headers.get("Content-Description", b"").decode("latin1")
-        if response.status == 200 and (
-            body.startswith("Dataset {") or xdods or "dods" in desc.lower()
-        ):
+        if response.status == 200 and body.startswith("Dataset {"):
             yield {
                 "url": base,
                 "dap_version": "2",

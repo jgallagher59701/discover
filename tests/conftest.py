@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -7,6 +8,8 @@ from scrapy.http import TextResponse, XmlResponse
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dap_spider import DapSpider  # noqa: E402  (needs sys.path insert above)
+
+REGRESSION_FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "regression"
 
 
 def make_response(url, body="", status=200, headers=None):
@@ -43,3 +46,18 @@ def spider():
     """A DapSpider instance with no Crawler attached, for calling its bound
     callback methods directly against synthetic responses."""
     return DapSpider(seeds_file="unused")
+
+
+def load_captured_response(slug):
+    """Rebuild a real captured response (see tests/tools/capture_fixtures.py
+    and docs/plan-for-dap-spider-callback-and-regression-tests.md, Step B2)
+    from tests/fixtures/regression/<slug>.json, for offline replay against
+    spider callbacks -- no network access."""
+    data = json.loads((REGRESSION_FIXTURES_DIR / f"{slug}.json").read_text())
+    response = make_response(
+        url=data["url"],
+        body=data["body"],
+        status=data["status"],
+        headers=data["headers"],
+    )
+    return response, data
