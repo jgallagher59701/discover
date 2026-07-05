@@ -54,11 +54,27 @@ pytest tests/ -v
 
 Unit tests for the pure helper functions (`strip_dap_suffix`,
 `strip_query_string`, `is_thredds_catalog`) and for `DapSpider`'s callbacks
-(`probe`, `on_dmr`, `on_dds`, `parse_thredds_catalog`, `start`), run against
-synthetic `scrapy.http.Response` objects — no network access, runs in well
-under a second. There's no live-crawl test suite; see
-`docs/plan-for-dap-spider-callback-and-regression-tests.md` for the plan to
-add regression coverage from real crawl data.
+(`probe`, `on_dmr`, `on_dds`, `parse_thredds_catalog`, `start`), plus
+regression tests replaying real captured responses from
+`tests/fixtures/regression/` (see `tests/tools/capture_fixtures.py`) — all
+run against synthetic/captured `scrapy.http.Response` objects, no network
+access, well under a second. See
+`docs/plan-for-dap-spider-callback-and-regression-tests.md` for how this
+suite was built and what it found (including a real false-positive fix in
+`on_dds`).
+
+An opt-in live smoke test (`tests/test_live_smoke.py`) runs the real spider
+against real hosts and is excluded by default (`pytest.ini`); run it by hand
+occasionally with:
+
+```bash
+pytest tests/test_live_smoke.py -m live -v -s
+```
+
+It only checks that the Scrapy plumbing (robots.txt fetching, request
+dispatch, retries) works end-to-end — it does not assert that any specific
+real host confirms, since third-party robots.txt/server state can change at
+any time (see the test's own comments).
 
 ## Athena variant (Stage 1, server-side, cheaper at scale)
 

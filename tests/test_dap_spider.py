@@ -489,3 +489,88 @@ def test_start_no_seeds_file_yields_nothing(spider):
     spider.seeds_file = None
     results = asyncio.run(_drain(spider.start()))
     assert results == []
+
+
+# ---- Step B3: remaining real-world regression fixtures --------------------
+#
+# Every fixture in tests/fixtures/regression/ (tests/tools/capture_fixtures.py)
+# replayed here, beyond the on_dds-specific ones already covered while fixing
+# the XDODS-Server false positive above. Pins down real, observed behavior so
+# a future change to dap_spider.py shows up as a diff here instead of
+# silently changing behavior against real institutional hosts.
+
+ON_DMR_FALLS_THROUGH_TO_DDS = [
+    "alexporn.org-911533940c-dmr",
+    "apdrc.soest.hawaii.edu-dcfb75a117-dmr",
+    "erddap.dataexplorer.oceanobservatories.org-103982f1c3-dmr",
+    "gcoos4.geos.tamu.edu-0e988be706-dmr",
+    "pae-paha.pacioos.hawaii.edu-31aff2ba4d-dmr",
+    "pae-paha.pacioos.hawaii.edu-c5af10e022-dmr",
+    "wcs.hycom.org-94959ae7b2-dmr",
+]
+
+
+@pytest.mark.parametrize("slug", ON_DMR_FALLS_THROUGH_TO_DDS)
+def test_on_dmr_real_captures_fall_through_to_dds(spider, slug):
+    # Covers: a 404 false-positive host (alexporn.org), three real ERDDAP
+    # hosts whose dmr.xml probe has no DAP4 signal (the same three whose dds
+    # probe was the on_dds false positive above), the .html-suffixed dodsC
+    # gap's dmr side (400 "dods-error", pae-paha.pacioos.hawaii.edu x2), and
+    # the jnlp-embedded-URL false positive (wcs.hycom.org).
+    response, data = load_captured_response(slug)
+    base = strip_dap_suffix(data["seed"])
+    results = list(spider.on_dmr(response, base=base))
+    assert len(results) == 1
+    assert results[0].url == base + ".dds"
+    assert results[0].callback == spider.on_dds
+
+
+def test_on_dmr_real_hyrax_capture_confirms_dap4(spider):
+    response, data = load_captured_response("test.opendap.org_8080-3b6f8c0461-dmr")
+    base = strip_dap_suffix(data["seed"])
+    results = list(spider.on_dmr(response, base=base))
+    assert len(results) == 1
+    assert results[0]["dap_version"] == "4"
+    assert results[0]["url"] == base
+
+
+ON_DDS_REAL_CAPTURES_YIELD_NOTHING = [
+    "alexporn.org-911533940c-dds",
+    "pae-paha.pacioos.hawaii.edu-31aff2ba4d-dds",
+    "pae-paha.pacioos.hawaii.edu-c5af10e022-dds",
+    "wcs.hycom.org-94959ae7b2-dds",
+]
+
+
+@pytest.mark.parametrize("slug", ON_DDS_REAL_CAPTURES_YIELD_NOTHING)
+def test_on_dds_real_captures_yield_nothing(spider, slug):
+    # The three real ERDDAP false positives already have dedicated coverage
+    # above (test_on_dds_rejects_real_erddap_ui_pages_that_carry_xdods_header);
+    # these four round out the rest of the frozen seed list's dds captures:
+    # a 404 (alexporn.org), the .html-suffixed dodsC gap's actual wire shape
+    # (200 status, 0-byte body -- no signal at all, a false negative rather
+    # than a false positive), and the jnlp false positive (wcs.hycom.org).
+    response, data = load_captured_response(slug)
+    base = strip_dap_suffix(data["seed"])
+    results = list(spider.on_dds(response, base=base))
+    assert results == []
+
+
+CATALOG_REAL_CAPTURES_YIELD_NOTHING = [
+    "gcoos5.geos.tamu.edu-0a81cde700-catalog",
+    "sgbd.acmad.org_8080-348d7e4ca0-catalog",
+]
+
+
+@pytest.mark.parametrize("slug", CATALOG_REAL_CAPTURES_YIELD_NOTHING)
+def test_parse_thredds_catalog_real_captures_yield_nothing(spider, slug):
+    # Real Content-Type on both captures is text/html, so Scrapy would build
+    # an HtmlResponse (not XmlResponse) for these in production too --
+    # load_captured_response's plain TextResponse (HTML-parser .selector) is
+    # the faithful choice here, unlike the synthetic .xml fixtures in Step A3
+    # which needed make_xml_response. Confirms Step A3's root-cause theory
+    # (catalog.html is a rendered view with zero InvCatalog elements) against
+    # the real pages, not just a hand-written stand-in.
+    response, _ = load_captured_response(slug)
+    results = list(spider.parse_thredds_catalog(response))
+    assert results == []

@@ -478,3 +478,121 @@ regression tests as outlined above."
   crawl (multi-hour, hits real hosts) as part of this fix -- that's a
   separate decision for you, not something to do silently as a side effect
   of a bug fix.
+
+## 2026-07-05 (Step B3)
+
+**Prompt:** "Proceed with step B3."
+
+**Reasoning / actions:**
+
+- The previous step (fixing `on_dds`) had already pulled forward replay
+  tests for 4 of the 18 captured fixtures (the 3 real ERDDAP false
+  positives plus the Hyrax `.dds` true positive) to prove that fix. This
+  step covers the remaining 14, completing full replay coverage of every
+  fixture in `tests/fixtures/regression/`.
+- Grouped the remaining fixtures by expected outcome, derived from the
+  header/body inspection already done in Step B2's log, rather than
+  re-deriving from scratch:
+  - 7 `on_dmr` captures that correctly fall through to a `.dds` fallback
+    `Request` (no DAP4 signal): the 3 ERDDAP hosts (dmr side of the
+    false-positive hosts -- confirms the false positive is dds-specific,
+    not present at the dmr stage for these), the 404 `alexporn.org`
+    false positive, the two `.html`-suffixed `dodsC` gap captures (400
+    `dods-error`), and the `wcs.hycom.org` jnlp false positive.
+  - 1 `on_dmr` capture that correctly confirms DAP4: the real Hyrax
+    `test.opendap.org` response (body signature `DAP/4.0`, no `XDAP` header
+    at all -- consistent with the reasoning in the on_dds fix for why
+    "body signature alone" is the right bar, not "header required too").
+  - 4 remaining `on_dds` captures yielding nothing: the 404 false positive,
+    the two `.html`-suffixed `dodsC` gap captures (200 status but a 0-byte
+    body -- confirmed this is a false *negative*, not a false positive: no
+    signal at all, correctly rejected), and the jnlp false positive.
+  - 2 `parse_thredds_catalog` captures yielding nothing: both real
+    `catalog.html` pages, confirming Step A3's root-cause theory
+    (`catalog.html` is a rendered view with zero InvCatalog elements)
+    against real server output, not just a hand-written stand-in.
+- For the catalog fixtures, used the plain `make_response`/`TextResponse`
+  path (not `make_xml_response`) deliberately, and documented why in a test
+  comment: both real captures have `Content-Type: text/html`, so Scrapy
+  would build an `HtmlResponse` in production for these too -- unlike Step
+  A3's synthetic `.xml`-suffixed fixtures, which needed `XmlResponse` to
+  faithfully represent what a real `.xml` catalog request gets. Using the
+  parser type that matches the real captured `Content-Type` is the more
+  faithful choice here, not a shortcut.
+- Derived `base` for each `on_dmr`/`on_dds` replay from the fixture's own
+  recorded `seed` field via `strip_dap_suffix()` (the same function the
+  spider itself uses), rather than hand-typing expected base URLs, so the
+  assertions can't silently drift from what the seed classification logic
+  actually computes.
+- Ran `pytest tests/ -v`: 74/74 pass (60 pre-existing + 14 new) in 0.07s, no
+  network access. All 18 files in `tests/fixtures/regression/` are now
+  referenced by at least one test -- verified by cross-checking every
+  filename against the test parametrize lists.
+- This completes Part B's core replay coverage (Steps B1-B3). Step B4 (an
+  optional, opt-in `@pytest.mark.live` smoke test against a tiny real seed
+  file) remains explicitly optional per the plan -- not started, pending
+  your interest.
+- Did not re-run the full production crawl or update `dap_endpoints.jsonl`
+  -- unchanged from the prior step's note.
+
+## 2026-07-05 (Step B4)
+
+**Prompt:** "Yes, build that smoke test." (following an offer to build the
+optional Step B4 live smoke test.)
+
+**Reasoning / actions:**
+
+- Added `pytest.ini` (none existed) registering a `live` marker and setting
+  `addopts = -m "not live"`, so the default `pytest tests/` run stays fully
+  offline/fast and the new test needs an explicit `-m live` to run.
+- Before writing the real test, spiked the one API risk: `DapSpider.
+  custom_settings` hardcodes `FEEDS` to the repo-relative
+  `"dap_endpoints.jsonl"`. Confirmed empirically that overriding `FEEDS` via
+  a spider *subclass* (settings precedence: spider > project) reliably wins
+  over whatever's passed to `CrawlerProcess(settings=...)`, and that doing
+  so never creates a file at the repo root regardless of pytest's working
+  directory -- this matters because getting it wrong could have silently
+  clobbered `crawls/first/dap_endpoints.jsonl` or written a stray file into
+  the repo on every run.
+- Wrote `tests/test_live_smoke.py`, reusing the already-reviewed
+  `tests/fixtures/regression_seeds.txt` (10 seeds) as the live seed list
+  rather than inventing a new one, and ran it for real -- same hosts
+  already approved for the Step B2 capture, no new exposure.
+- **First version failed on the first real run**, and for a legitimate
+  reason worth recording: it asserted the Hyrax `test.opendap.org` seed
+  (the one clean, stable true positive in the fixture set) would always be
+  confirmed. `test.opendap.org`'s `robots.txt` currently serves a blanket
+  `Disallow: /` (confirmed independently via `curl`), so `ROBOTSTXT_OBEY`
+  correctly skipped every request to that host -- not a bug in
+  `dap_spider.py`, just real third-party state changing under the test
+  (it had allowed the same request ~2 minutes earlier, during an unrelated
+  spike run -- this host's robots.txt is apparently not stable moment to
+  moment, possibly a load-balanced test/demo deployment with inconsistent
+  backend config). This is exactly the category of flakiness Step B3's
+  offline fixture replay exists to avoid, and confirms that design choice
+  was right: hard per-seed assertions belong in the offline suite, not
+  here.
+- Rewrote the test to assert end-to-end plumbing health instead of
+  specific content: `finish_reason == "finished"`, at least one request was
+  issued, and at least one `robots.txt` fetch actually happened (proving
+  `ROBOTSTXT_OBEY` is really wired up, not just configured). Confirmed
+  endpoints are printed (visible with `-s`) for human inspection but not
+  asserted on.
+- Second real run hit a second, unrelated API bug in my own test: `next(
+  iter(process.crawlers))` raised `StopIteration` -- `CrawlerProcess.
+  crawlers` is a set that crawlers remove themselves from once stopped, so
+  it's already empty by the time `process.start()` returns.
+  `process.crawl()` itself only returns a completion `Deferred`, not the
+  `Crawler`. Fixed by calling `process.create_crawler(_SmokeSpider)` first
+  to get a durable reference, then `process.crawl(crawler, seeds_file=...)`.
+- Third real run passed: `finish_reason: "finished"`, real requests issued,
+  9 real `robots.txt` fetches, 0 endpoints confirmed this particular run
+  (several hosts timed out/retried, `test.opendap.org` still blocked by its
+  own robots.txt) -- exactly the outcome the corrected test is designed to
+  tolerate. Total real run time ~2 minutes.
+- Ran `pytest tests/ -v` (no `-m live`): 74 passed, 1 deselected -- confirms
+  the live test is properly excluded from the default/CI-style run.
+- Updated `README.md`'s Tests section to document the live smoke test and
+  how to run it.
+- This completes the full plan (Parts A and B, including the optional
+  Step B4).
