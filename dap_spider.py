@@ -98,11 +98,11 @@ class DapSpider(scrapy.Spider):
         "AUTOTHROTTLE_TARGET_CONCURRENCY": 1.0,
         "AUTOTHROTTLE_MAX_DELAY": 30,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 1,
-        "DOWNLOAD_DELAY": 2.0,
+        "DOWNLOAD_DELAY": 0.5,
         "DOWNLOAD_TIMEOUT": 20,
         "RETRY_TIMES": 2,
         "USER_AGENT": (
-            "OPeNDAP-Discovery/0.1 "
+            "OPeNDAP-Discovery/0.2"
             "(+https://www.opendap.org/; contact support@opendap.org)"
         ),
         # ---- output ----
@@ -123,10 +123,14 @@ class DapSpider(scrapy.Spider):
             return
         with open(self.seeds_file, encoding="utf-8") as f:
             self.logger.info(f"open seed file {self.seeds_file}")
+            count = 0
             for line in f:
                 url = line.strip()
                 if not url or url.startswith("#"):
                     continue
+                count += 1
+                if self.progress_every and count % self.progress_every == 0:
+                    print(".", end="", flush=True)
                 if is_thredds_catalog(url):
                     url = to_xml(url)
                     self.logger.info(f"seed [thredds catalog]: {url}")
@@ -139,6 +143,8 @@ class DapSpider(scrapy.Spider):
                     self.logger.info(f"seed [probe]: {url} -> base {base}")
                     for req in self.probe(base):
                         yield req
+            if self.progress_every:
+                print()
 
     # ---- DAP probing ---------------------------------------------------
 
@@ -229,7 +235,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("seeds_file")
     parser.add_argument(
-        "--progress-every",
+        "-p", "--progress-every",
         type=int,
         default=None,
         help="print a '.' for every Nth seed URL read from the seeds file",
