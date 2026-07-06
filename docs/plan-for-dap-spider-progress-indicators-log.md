@@ -139,3 +139,38 @@ network I/O occurs at all. Confirmed in the `discover` conda env:
 **Status:** Steps 1–3 implemented and verified (Step 3 verified via a
 network-free harness, not the literal command in the plan — see note
 above). Awaiting your review.
+
+## 2026-07-06 15:49 BST
+
+**Prompt:** "I want another option to pass in the log level from the command
+line. Add that." (Ad hoc addition, outside the scope of this plan's
+progress-dot work; implemented directly rather than via a new plan doc,
+given the small, mechanical size of the change.)
+
+**Note:** before this request, `dap_spider.py` had been edited outside this
+session (probe/DMR confirmation logic, `USER_AGENT`, `DOWNLOAD_DELAY`) — left
+those changes untouched and only added the log-level option on top.
+
+**Reasoning:**
+- Added `-l`/`--log-level` to `main()`'s `argparse` parser (`type=str.upper`
+  so lowercase input like `--log-level debug` is accepted, `choices`
+  restricted to the five standard `logging` level names, default `"INFO"`
+  to preserve current behavior when omitted).
+- Discovered `custom_settings["LOG_LEVEL"] = "INFO"` on `DapSpider` would
+  have made the new flag a no-op: Scrapy's settings precedence ranks
+  per-spider `custom_settings` ABOVE settings passed into `CrawlerProcess`,
+  so the hardcoded class attribute would always win. Removed that line from
+  `custom_settings` (with a comment explaining why) and instead pass
+  `CrawlerProcess(settings={"LOG_LEVEL": args.log_level})` in `main()`.
+- Verified precedence empirically rather than assuming: built a
+  `CrawlerProcess`+`create_crawler(DapSpider)` for both `DEBUG` and
+  `WARNING` and read back `crawler.settings.get("LOG_LEVEL")` — confirmed
+  it now reflects the CLI value in both cases (previously it would have
+  stayed `"INFO"` regardless).
+- Ran `python -m py_compile` and `--help` to confirm the new flag is wired
+  correctly alongside `-p`/`--progress-every` (also noticed a short `-p`
+  alias had been added to `--progress-every` outside this session; matched
+  that style for `-l`/`--log-level`).
+
+**Status:** `--log-level`/`-l` added and verified. No changes made to the
+progress-dot logic or to the out-of-session probe/DMR edits.

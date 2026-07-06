@@ -107,7 +107,10 @@ class DapSpider(scrapy.Spider):
         ),
         # ---- output ----
         "FEEDS": {"dap_endpoints.jsonl": {"format": "jsonlines"}},
-        "LOG_LEVEL": "INFO",
+        # LOG_LEVEL is set via --log-level in main() instead of here: spider
+        # custom_settings take precedence over settings passed to
+        # CrawlerProcess, so hardcoding it here would make --log-level a
+        # no-op.
     }
 
     def __init__(self, seeds_file=None, progress_every=None, *args, **kwargs):
@@ -248,8 +251,15 @@ def main():
         default=None,
         help="print a '.' for every Nth seed URL read from the seeds file",
     )
+    parser.add_argument(
+        "-l", "--log-level",
+        type=str.upper,
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Scrapy log level (default: %(default)s)",
+    )
     args = parser.parse_args()
-    process = CrawlerProcess()
+    process = CrawlerProcess(settings={"LOG_LEVEL": args.log_level})
     process.crawl(
         DapSpider, seeds_file=args.seeds_file, progress_every=args.progress_every
     )
