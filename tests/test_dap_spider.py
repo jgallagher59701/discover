@@ -115,13 +115,15 @@ def test_is_thredds_catalog_matches_catalog_prefixed_names_too():
 # DapSpider's bound methods directly against a real scrapy TextResponse, with
 # no Crawler/CrawlerProcess involved. Full case coverage for these callbacks
 # is Steps A2-A4.
+#
+# This test also shows that testing the body is heuristic. jhrg 7/6/26
 
 
 def test_harness_on_dmr_confirms_dap4_from_body_signature(spider):
     response = make_response(
         url="http://example.org/data/foo.dmr.xml",
-        body="Dataset { DAP/4.0 }",
-        headers={"XDAP": b"4.0"},
+        body="Dataset { dmrVersion }",
+        headers={"Content-Description": b"application/vnd.opendap.dap4.dataset-metadata+xml"},
     )
     results = list(spider.on_dmr(response, base="http://example.org/data/foo"))
     assert results == [
@@ -129,8 +131,9 @@ def test_harness_on_dmr_confirms_dap4_from_body_signature(spider):
             "url": "http://example.org/data/foo",
             "dap_version": "4",
             "probe_url": "http://example.org/data/foo.dmr.xml",
-            "xdap": "4.0",
-            "server": "",
+            "content_description": "application/vnd.opendap.dap4.dataset-metadata+xml",
+            "xdods_server": "",
+            "server": ""
         }
     ]
 
@@ -152,25 +155,24 @@ def test_probe_yields_single_dmr_request(spider):
 
 # -- on_dmr: DAP4 confirmation signals --
 
-
-def test_on_dmr_confirms_dap4_via_xdap_header_with_no_body_signature(spider):
+# Even with a content description that's pretty obvious, the spider only
+# uses the 'body signature.' jhrg 7/6/26
+def test_on_dmr_fails_dap4_with_no_body_signature(spider):
     response = make_response(
-        url=BASE + ".dmr.xml", body="not a real body", headers={"XDAP": b"4.0"}
+        url=BASE + ".dmr.xml", body="not a real body", 
+            headers={"Content-Description": b"application/vnd.opendap.dap4.dataset-metadata+xml"}
     )
     results = list(spider.on_dmr(response, base=BASE))
-    assert results == [
-        {
-            "url": BASE,
-            "dap_version": "4",
-            "probe_url": BASE + ".dmr.xml",
-            "xdap": "4.0",
-            "server": "",
-        }
-    ]
+    assert len(results) == 1
+    req = results[0]
+    assert req.url == BASE + ".dds"
+    assert req.callback == spider.on_dds
+    assert req.cb_kwargs == {"base": BASE}
+    assert req.dont_filter is True
 
 
-def test_on_dmr_confirms_dap4_via_dapversion_in_body(spider):
-    response = make_response(url=BASE + ".dmr.xml", body="<Dataset dapVersion='4.0'>")
+def test_on_dmr_confirms_dap4_via_dmrversion_in_body(spider):
+    response = make_response(url=BASE + ".dmr.xml", body="<Dataset dmrVersion='1.0'>")
     results = list(spider.on_dmr(response, base=BASE))
     assert len(results) == 1
     assert results[0]["dap_version"] == "4"
@@ -179,7 +181,7 @@ def test_on_dmr_confirms_dap4_via_dapversion_in_body(spider):
 def test_on_dmr_includes_server_header_when_present(spider):
     response = make_response(
         url=BASE + ".dmr.xml",
-        body="DAP/4.0",
+        body="dmrVersion",
         headers={"Server": b"Hyrax/1.17.1"},
     )
     results = list(spider.on_dmr(response, base=BASE))
@@ -187,9 +189,9 @@ def test_on_dmr_includes_server_header_when_present(spider):
 
 
 def test_on_dmr_missing_headers_decode_to_empty_string_not_error(spider):
-    response = make_response(url=BASE + ".dmr.xml", body="DAP/4.0")
+    response = make_response(url=BASE + ".dmr.xml", body="dmrVersion")
     results = list(spider.on_dmr(response, base=BASE))
-    assert results[0]["xdap"] == ""
+    assert results[0]["xdods_server"] == ""
     assert results[0]["server"] == ""
 
 
@@ -228,6 +230,7 @@ def test_on_dds_confirms_dap2_via_body_signature(spider):
             "url": BASE,
             "dap_version": "2",
             "probe_url": BASE + ".dds",
+            "content_description": "",
             "xdods_server": "",
             "server": "",
         }
