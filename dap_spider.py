@@ -66,6 +66,28 @@ def is_thredds_catalog(url: str) -> bool:
     return "/thredds/catalog" in p and (p.endswith(".html") or p.endswith(".xml") or p.endswith("/"))
 
 
+from urllib.parse import urlsplit, urlunsplit
+
+def to_xml(url: str) -> str:
+    """
+    Since the spider parses the thredds catalog as XML, we need to 
+    turn .../catalog.html URLs into catalog.xml URLs. This code will do
+    that under all sorts of conditions and won't mange the http:// part
+    of the URL.
+
+    From CLAUDE.
+    """
+    parts = urlsplit(url)
+    path = parts.path
+    if path.endswith("/"):
+        path = path.rstrip("/") + ".xml"      # catalog/ -> catalog.xml
+    elif "." in path.rsplit("/", 1)[-1]:
+        path = path.rsplit(".", 1)[0] + ".xml"  # catalog.html -> catalog.xml
+    else:
+        path = path + ".xml"                   # catalog -> catalog.xml
+    return urlunsplit(parts._replace(path=path))
+
+
 class DapSpider(scrapy.Spider):
     name = "dap"
 
@@ -105,12 +127,14 @@ class DapSpider(scrapy.Spider):
                 if not url or url.startswith("#"):
                     continue
                 if is_thredds_catalog(url):
+                    url = to_xml(url)
                     self.logger.info(f"seed [thredds catalog]: {url}")
                     yield scrapy.Request(
                         url, callback=self.parse_thredds_catalog, errback=self.on_error
                     )
                 else:
-                    base = strip_dap_suffix(url)
+                    # Added call to strip the query string. jhrg 7/6/26
+                    base = strip_dap_suffix(strip_query_string(url))
                     self.logger.info(f"seed [probe]: {url} -> base {base}")
                     for req in self.probe(base):
                         yield req

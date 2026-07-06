@@ -4,7 +4,7 @@ import types
 import pytest
 
 from conftest import load_captured_response, make_response, make_xml_response
-from dap_spider import is_thredds_catalog, strip_dap_suffix, strip_query_string
+from dap_spider import is_thredds_catalog, strip_dap_suffix, strip_query_string, to_xml
 
 
 @pytest.mark.parametrize(
@@ -39,6 +39,22 @@ def test_strip_dap_suffix_dmr_xml_and_dmr_do_not_interfere():
 def test_strip_dap_suffix_empty_string_returns_unchanged():
     assert strip_dap_suffix("") == ""
 
+
+def test_html_to_xml():
+    assert to_xml("https://x.edu/thredds/catalog.html") == "https://x.edu/thredds/catalog.xml"
+
+
+def test_html_to_xml_trailing_slash():
+    assert to_xml("https://x.edu/thredds/catalog/") == "https://x.edu/thredds/catalog.xml"
+
+
+def test_html_to_xml_bare_catalog():
+    assert to_xml("https://x.edu/thredds/catalog") == "https://x.edu/thredds/catalog.xml"
+
+
+# Test that the query string is preserved
+def test_html_to_xml_html_with_query_string():
+    assert to_xml("https://x.edu/thredds/catalog.html?x=1") == "https://x.edu/thredds/catalog.xml?x=1"
 
 # ---- strip_query_string -------------------------------------------------
 
