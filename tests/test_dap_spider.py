@@ -519,10 +519,13 @@ def test_start_probe_seed_with_unsuffixed_query_string_issue_4(tmp_path, spider)
     spider.seeds_file = str(seeds)
     results = asyncio.run(_drain(spider.start()))
     assert len(results) == 1
-    # suffix appended to the real base, not glued after "distinct()"
+    # suffix appended to the real base, not glued after "distinct()". ".html"
+    # is also stripped (issue #3): confirmed on the wire that
+    # allDatasets.html.dmr.xml/.dds 404s ("unknown datasetID=allDatasets.html")
+    # while allDatasets.dmr.xml/.dds is the real ERDDAP dataset.
     assert results[0].url == (
         "https://erddap.dataexplorer.oceanobservatories.org/erddap/tabledap/"
-        "allDatasets.html.dmr.xml"
+        "allDatasets.dmr.xml"
     )
 
 

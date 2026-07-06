@@ -39,7 +39,7 @@ https://erddap.dataexplorer.oceanobservatories.org/erddap/tabledap/allDatasets.h
 # is a false positive our confirmation logic doesn't catch.
 http://apdrc.soest.hawaii.edu/erddap/griddap/index.json?page=1&itemsPerPage=1000
 
-# --- known gap: .html-suffixed dodsC URL, not in DAP_SUFFIXES so never stripped ---
+# --- .html-suffixed dodsC URLs (issue #3, fixed: ".html" added to DAP_SUFFIXES) ---
 # (notes_from_first_crawl.md lists these under "did not get crawled")
 https://pae-paha.pacioos.hawaii.edu/thredds/dodsC/hmrg_bathytopo_50m_mhi.html
 https://pae-paha.pacioos.hawaii.edu/thredds/dodsC/neowave_nawiliwili.html
