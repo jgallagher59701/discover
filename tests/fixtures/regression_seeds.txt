@@ -55,7 +55,7 @@ http://sgbd.acmad.org:8080/thredds/catalog/ACMAD/WWFD/forecastinservice/ensemble
 # --- regex false positive: matches on the literal substring "dap" in the URL, ---
 # not a DAP host at all. Already confirmed absent from dap_endpoints.jsonl
 # (the real 2026.21 crawl correctly found nothing here).
-http://alexporn.org/tags/dap/
+http://savannah.gnu.org/projects/dap/
 
 # --- regex false positive, different shape: the actual dodsC URL is embedded ---
 # in a query PARAMETER of an unrelated IDV-viewer launch page (.jnlp), not
