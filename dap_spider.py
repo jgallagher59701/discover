@@ -268,7 +268,7 @@ def main():
     parser.add_argument(
         "-l", "--log-level",
         type=str.upper,
-        default="INFO",
+        default="WARNING",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Scrapy log level (default: %(default)s)",
     )
