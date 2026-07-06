@@ -174,3 +174,53 @@ those changes untouched and only added the log-level option on top.
 
 **Status:** `--log-level`/`-l` added and verified. No changes made to the
 progress-dot logic or to the out-of-session probe/DMR edits.
+
+## 2026-07-06 (later)
+
+**Prompt:** "I'd like to revisit the plan and change that progress indicator
+so that the period is printed when the URL is dereferenced, not when the
+access is scheduled. Can you alter the plan to reflect that? Or would a new
+plan be better?"
+
+**Reasoning:**
+- Re-read `dap_spider.py` in full to confirm current state: Steps 1–3 of the
+  original plan are already implemented (schedule-time dots counted in
+  `start()`'s seed loop).
+- Judged this a revision of the same design decision (where the dot fires),
+  not a new feature, so amending the existing plan doc was the right call
+  rather than starting a new one.
+- Worked out that "dereferenced" doesn't map 1:1 onto "seed line": a seed can
+  produce 0 requests (skipped), 1–2 (`probe()`'s DAP4→DAP2 fallback), or many
+  (THREDDS catalog recursion). So the counter has to move from counting seed
+  lines to counting completed HTTP responses/failures, at the four points in
+  the code where a request actually completes: `on_dmr`, `on_dds`,
+  `parse_thredds_catalog`, `on_error`.
+- Initially proposed hooking Scrapy's `response_received` signal as "the
+  clean way" to do this without touching four separate methods. On reviewing
+  the signal's semantics against the code, rejected that: `response_received`
+  only fires on success, so failed requests (which still go through
+  `errback`/`on_error`) would need separate instrumentation anyway — signal
+  wiring would add a `from_crawler` override for no net reduction in call
+  sites over just calling a shared counter helper directly from the four
+  callbacks. Recorded this as a rejected alternative in the plan so the
+  reasoning isn't silently lost.
+- Also worked out the trailing-newline consequence: the original plan printed
+  it at the end of `start()`'s seed loop, a single synchronous point. With
+  dereferences now spread asynchronously across the whole crawl, moved that
+  to Scrapy's `closed(self, reason)` spider callback, which fires exactly
+  once when the spider finishes — no signal wiring needed for this part
+  either, since `closed()` is a normal `Spider` method Scrapy already calls.
+- Rewrote `plan-for-dap-spider-progress-indicators.md`: added a `## Status`
+  header noting this is a revision of already-implemented work; updated
+  `## Scope` with the 2026-07-06 rationale for the change; added a new
+  `## Design change` section explaining the seed-line-vs-dereference mismatch
+  and the rejected signal-based alternative; rewrote Step 2 around the
+  `_tick_progress()` helper + four callback call sites + `closed()` override;
+  rewrote Step 3's verification plan to exercise the four callbacks directly
+  instead of `start()`; left Step 1 marked unchanged/already-implemented;
+  updated `## Out of scope` (dropped the now-stale "not in scope:
+  `probe()`/`on_dmr`/`on_dds`" line from the original, since dot-printing is
+  now explicitly inside those methods).
+
+**Status:** Plan revised, no code changes made yet. Awaiting review before
+implementing Step 2/3 changes against `dap_spider.py`.

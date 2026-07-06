@@ -47,7 +47,8 @@ https://pae-paha.pacioos.hawaii.edu/thredds/dodsC/neowave_nawiliwili.html
 # --- known gap: catalog.html is a rendered HTML view, not InvCatalog XML ---
 # (root-caused in Step A3's test_parse_thredds_catalog_html_rendered_page_yields_nothing;
 # notes_from_first_crawl.md lists this host under "did not get crawled")
-# jhrg 7/6/26 https://gcoos5.geos.tamu.edu/thredds/catalog/catalog.html
+# https://gcoos5.geos.tamu.edu/thredds/catalog/catalog.html
+https://oceanmodeling.ucsc.edu/thredds/catalog/catalog.xml
 
 # --- same gap, with a query string, to confirm the miss isn't query-string-related ---
 http://sgbd.acmad.org:8080/thredds/catalog/ACMAD/WWFD/forecastinservice/ensemble5/2022/202201/20220104/catalog.html?dataset=ACMAD/WWFD/forecastinservice/ensemble5/2022/202201/20220104/ARP20220104_48.png

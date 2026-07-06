@@ -1,84 +1,108 @@
 # Plan: progress indicators for `dap_spider.py`
 
+## Status
+
+Revision of an already-implemented feature. Steps 1–3 below (schedule-time
+dots, counting seed lines in `start()`) were implemented and verified — see
+`plan-for-dap-spider-progress-indicators-log.md`. This revision changes where
+the dot fires and requires re-implementation + re-verification of Step 2/3
+only; Step 1 (constructor option + CLI wiring) is untouched.
+
 ## Scope
 
-One opt-in display option for `DapSpider`, driven from the seed-file loop in
-`async def start()`:
+One opt-in display option for `DapSpider`: print a period (no newline) for
+every Nth URL **dereferenced** (an actual HTTP response or failure comes
+back), not every Nth seed line scheduled.
 
-1. **Progress dots** — print a period (no newline) for every Nth seed URL
-   read from the seeds file.
+**Revised 2026-07-06.** The original plan counted seed lines as they were
+read in `start()`. But `start()` only *yields* `scrapy.Request` objects — the
+actual fetch happens later, asynchronously, throttled by
+`AUTOTHROTTLE`/`DOWNLOAD_DELAY`/`CONCURRENT_REQUESTS_PER_DOMAIN=1`. Counting
+seed lines makes the dots print in a tight burst as fast as the seed file can
+be iterated (effectively instantaneous), which doesn't track the actual,
+network-bound progress of the crawl — the thing a progress indicator is for.
 
-This is for interactive visibility during a run and is independent of
-Scrapy's own `LOG_LEVEL`/logger — it uses plain `print()` so it behaves the
-same whether Scrapy logging is verbose, quiet, or redirected. Confirmed via
-Scrapy's own defaults (`LOG_STDOUT=False`) that this keeps the dots on stdout
-while Scrapy's own logging stays on stderr, so the two don't interleave.
+Kept from the original plan, unchanged:
+- Opt-in via `progress_every` (constructor) / `--progress-every`/`-p` (CLI).
+- Plain `print(".", end="", flush=True)`, not `self.logger` — stays on stdout
+  independent of Scrapy's stderr logging and `--log-level`.
+- Seed echo still dropped; existing `self.logger.info("seed [...]")` calls in
+  `start()` remain the sole mechanism for seed visibility (unaffected by this
+  revision).
 
-**Seed echo dropped from this plan.** `custom_settings["LOG_LEVEL"] = "INFO"`
-plus the existing `self.logger.info(f"seed [thredds catalog]: {url}")` /
-`self.logger.info(f"seed [probe]: {url} -> base {base}")` calls in `start()`
-already print every seed URL, today, with no code change. Decision: rely on
-that existing INFO-level logging for seed visibility instead of adding a
-second, parallel `print()`-based mechanism. Tradeoff worth remembering if
-this resurfaces later: those log lines are mixed in with every other Scrapy
-INFO record (crawled responses, autothrottle, robots.txt fetches, stats
-dumps) and fully formatted (timestamp/logger-name/level prefix), not a bare
-URL — acceptable per your call, but not equivalent to a clean seeds-only
-stream.
+## Design change: what counts as "dereferenced"
 
-Not in scope: changing existing `self.logger.info(...)` calls in `start()`,
-changing `custom_settings["LOG_LEVEL"]`, or adding progress output anywhere
-inside `probe()`/`on_dmr`/`on_dds`.
+A seed line does not correspond 1:1 with an HTTP request:
+- A THREDDS catalog seed can recurse into any number of sub-catalog requests
+  via `parse_thredds_catalog`.
+- A probe seed produces 1 request (`.dmr.xml`) if DAP4 confirms in `on_dmr`,
+  or 2 (`.dmr.xml` then `.dds`) if it falls back to DAP2.
+- Catalog datasets discovered during recursion (`parse_thredds_catalog` →
+  `probe()`) generate further probe requests that were never literal
+  seed-file lines at all.
+
+So "dereferenced" is redefined as: **one Scrapy response or failure actually
+returned from the network**, counted at the four points in `dap_spider.py`
+where a completed request lands:
+- `on_dmr` — response for `<base>.dmr.xml`
+- `on_dds` — response for `<base>.dds`
+- `parse_thredds_catalog` — response for a catalog URL (top-level or
+  recursive)
+- `on_error` — a failed request (timeout, connection error, robots.txt
+  disallow, etc.)
+
+**Considered and rejected:** hooking Scrapy's `response_received` signal
+instead of instrumenting these four methods directly. Rejected because that
+signal only fires on success — failed requests still represent a completed
+dereference attempt but go through `errback`/`on_error` and never fire
+`response_received`. Using the signal would still require instrumenting
+`on_error` separately on top of the signal wiring, which is more moving parts
+for no simpler outcome than a shared counter helper called directly from the
+four existing callbacks.
 
 ## Step 1 — constructor option + CLI wiring
 
-- Add one `__init__` param to `DapSpider`:
-  - `progress_every: int | None = None` — `None`/`0` disables; otherwise
-    print `.` for every Nth seed line.
-- Scrapy spider args arrive as strings when passed via `-a`; since `main()`
-  is the only current entry point and constructs `DapSpider` directly via
-  `process.crawl(...)`, cast in `main()` before passing through, not in
-  `__init__`.
-- `main()` currently does bare positional `sys.argv[1]` parsing. Decided:
-  switch to `argparse`, with one positional (`seeds_file`) and one optional
-  flag (`--progress-every N`, `type=int`, default `None`). Replaces the
-  current `len(sys.argv) < 2` / manual usage-message check with argparse's
-  built-in handling.
+**Unchanged, already implemented** (`dap_spider.py:116-119`, `245-266`):
+`progress_every` constructor param, `-p`/`--progress-every` CLI flag via
+argparse, cast at the CLI boundary. No action needed.
 
-## Step 2 — progress dots in `start()`
+## Step 2 — progress dots on dereference (revised)
 
-- Add a counter incremented once per non-blank, non-comment line (i.e., the
-  same lines that currently reach the `is_thredds_catalog`/`probe` branch —
-  skipped/blank/comment lines don't count).
-- When `progress_every` is set and `counter % progress_every == 0`, do
-  `print(".", end="", flush=True)`.
-- Print a trailing `print()` (bare newline) once the seed-file loop ends, so
-  a mid-line run of dots doesn't collide with the shell prompt or a
-  subsequent log line. Flag `closed()` (Scrapy's spider-closed callback) as
-  the alternate place to do this if the loop-end isn't reliably reached
-  (e.g., exception mid-loop) — plan to add a minimal `closed()` override only
-  if needed.
+- Remove the counter and both `print()` calls currently in `start()`'s seed
+  loop (`dap_spider.py:129`, `135-136`, `149-150`) — scheduling a request no
+  longer prints anything.
+- Add `self._deref_count = 0` in `__init__`, and a small helper, e.g.
+  `self._tick_progress()`, that increments it and prints `.` when
+  `self.progress_every` is set and the new count is a multiple of it.
+- Call `self._tick_progress()` at the top of `on_dmr`, `on_dds`,
+  `parse_thredds_catalog`, and `on_error`, before any other logic in each —
+  every completed dereference ticks the same counter regardless of which
+  callback it came through.
+- Trailing newline: since dereferences now happen asynchronously throughout
+  the whole crawl with no single loop-end point, move
+  `if self.progress_every: print()` out of `start()` and into a
+  `closed(self, reason)` override — Scrapy calls this automatically exactly
+  once, when the spider finishes (all pending requests drained).
 
-## Step 3 — manual verification
+## Step 3 — manual verification (revised)
 
-Per CLAUDE.md, no test suite covers `start()` today (see
-`plan-for-dap-spider-unit-tests.md`, which explicitly scoped the spider
-methods out). Verification plan:
-- Run `python dap_spider.py tests/fixtures/regression_seeds.txt
-  --progress-every 5` and confirm one dot per 5 seed lines, trailing newline
-  present, existing logger output unaffected.
-- Run with `--progress-every` omitted and confirm output is byte-identical
-  to current behavior (no dots) — this is the regression check.
-- Confirm existing `self.logger.info("seed [...]")` lines are still present
-  and unchanged at `LOG_LEVEL=INFO`, since that's now the sole mechanism for
-  seed visibility.
+Same network-free-harness approach as the original verification (see log,
+2026-07-06 15:12), but exercising the four callbacks instead of `start()`:
+- Confirm scheduling a batch of requests with `--progress-every` set prints
+  no dots until responses/failures are fed back through
+  `on_dmr`/`on_dds`/`parse_thredds_catalog`/`on_error`.
+- Feed N synthetic responses/failures through those four callbacks directly
+  (no real network) and confirm one dot per `progress_every`-th call, in a
+  mix across all four, to check the shared counter is order-independent.
+- Confirm `closed()` emits exactly one trailing newline, and only when
+  `--progress-every` was set.
+- Confirm `--progress-every` omitted → stdout byte-identical to current
+  behavior (regression check, same as original plan).
 
 ## Out of scope / follow-ups
 
-- No automated test added for `start()` output — `start()` is an async
-  generator driven by the Scrapy engine and isn't covered by the existing
-  pure-function unit tests; adding fixtures/mocks for it would be a separate,
-  larger effort (see `plan-for-dap-spider-unit-tests.md`'s "Out of scope").
-- Seed echo as a dedicated, Scrapy-noise-free stdout stream (rather than
-  mixed into INFO-level logging) was considered and dropped — revisit if the
-  existing INFO logging turns out to be too noisy in practice.
+- No automated test added for `start()`/callback output — same rationale as
+  the original plan (`plan-for-dap-spider-unit-tests.md` scopes spider
+  methods out of the pure-function unit-test suite).
+- Seed echo as a dedicated, Scrapy-noise-free stdout stream was considered
+  and dropped in the original plan; unaffected by this revision.
