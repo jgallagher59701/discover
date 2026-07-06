@@ -24,7 +24,7 @@ the csv file
 
 | Name | lines | What |
 |--|--|--|
-| candidate_urls.2026.21.csv | 11,914 | Initial crawl, limited to org and edu and  no contents.html|catalog.xml in the regex |
+| candidate_urls.2026.21.csv | 11,914 | Initial crawl, limited to org and edu and no contents.html or catalog.xml in the regex |
 | candidate_urls.more_patterns.csv | 22,880 | Added more patterns and used the more more expansive TLDs ('edu', 'org', 'gov', 'mil' and %.ac.%, ...) |
 | candidate_urls.all_TLDs.csv | 44,275 | Expansive patterns, all TLDs |
 
