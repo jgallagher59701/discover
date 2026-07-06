@@ -40,6 +40,7 @@ from scrapy.crawler import CrawlerProcess
 DAP_SUFFIXES = (
     ".dmr.xml", ".dmr", ".dap", ".dsr",          # DAP4
     ".dds", ".das", ".dods", ".info", ".ascii",  # DAP2
+    ".html",  # THREDDS/ERDDAP HTML view of a dataset, e.g. .../dodsC/foo.nc.html
 )
 
 THREDDS_NS = {
