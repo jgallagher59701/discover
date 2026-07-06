@@ -500,7 +500,7 @@ def test_start_no_seeds_file_yields_nothing(spider):
 # silently changing behavior against real institutional hosts.
 
 ON_DMR_FALLS_THROUGH_TO_DDS = [
-    "alexporn.org-911533940c-dmr",
+    "savannah.gnu.org-f596456d85-dmr",
     "apdrc.soest.hawaii.edu-dcfb75a117-dmr",
     "erddap.dataexplorer.oceanobservatories.org-103982f1c3-dmr",
     "gcoos4.geos.tamu.edu-0e988be706-dmr",
@@ -512,7 +512,7 @@ ON_DMR_FALLS_THROUGH_TO_DDS = [
 
 @pytest.mark.parametrize("slug", ON_DMR_FALLS_THROUGH_TO_DDS)
 def test_on_dmr_real_captures_fall_through_to_dds(spider, slug):
-    # Covers: a 404 false-positive host (alexporn.org), three real ERDDAP
+    # Covers: a 404 false-positive host (savannah.gnu.org), three real ERDDAP
     # hosts whose dmr.xml probe has no DAP4 signal (the same three whose dds
     # probe was the on_dds false positive above), the .html-suffixed dodsC
     # gap's dmr side (400 "dods-error", pae-paha.pacioos.hawaii.edu x2), and
@@ -535,7 +535,7 @@ def test_on_dmr_real_hyrax_capture_confirms_dap4(spider):
 
 
 ON_DDS_REAL_CAPTURES_YIELD_NOTHING = [
-    "alexporn.org-911533940c-dds",
+    "savannah.gnu.org-f596456d85-dds",
     "pae-paha.pacioos.hawaii.edu-31aff2ba4d-dds",
     "pae-paha.pacioos.hawaii.edu-c5af10e022-dds",
     "wcs.hycom.org-94959ae7b2-dds",
@@ -547,7 +547,7 @@ def test_on_dds_real_captures_yield_nothing(spider, slug):
     # The three real ERDDAP false positives already have dedicated coverage
     # above (test_on_dds_rejects_real_erddap_ui_pages_that_carry_xdods_header);
     # these four round out the rest of the frozen seed list's dds captures:
-    # a 404 (alexporn.org), the .html-suffixed dodsC gap's actual wire shape
+    # a 404 (savannah.gnu.org), the .html-suffixed dodsC gap's actual wire shape
     # (200 status, 0-byte body -- no signal at all, a false negative rather
     # than a false positive), and the jnlp false positive (wcs.hycom.org).
     response, data = load_captured_response(slug)
