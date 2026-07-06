@@ -1,0 +1,16 @@
+{
+  "body": "",
+  "body_truncated": false,
+  "headers": {
+    "Access-Control-Allow-Origin": "*",
+    "Connection": "close",
+    "Content-Length": "0",
+    "Content-Type": "text/html",
+    "Date": "Sat, 04 Jul 2026 08:00:32 GMT",
+    "Server": "Apache/2.4.29 (Ubuntu)"
+  },
+  "kind": "dds",
+  "seed": "https://pae-paha.pacioos.hawaii.edu/thredds/dodsC/neowave_nawiliwili.html",
+  "status": 200,
+  "url": "https://pae-paha.pacioos.hawaii.edu/thredds/dodsC/neowave_nawiliwili.html.dds"
+}

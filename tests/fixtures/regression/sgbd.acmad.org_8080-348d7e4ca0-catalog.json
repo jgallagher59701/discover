@@ -1,0 +1,14 @@
+{
+  "body": "<!DOCTYPE html PUBLIC '-//W3C//DTD HTML 4.01 Transitional//EN'\n        'http://www.w3.org/TR/html4/loose.dtd'>\n<html>\n<head>\r\n<title> Catalog Services</title>\r\n<meta http-equiv='Content-Type' content='text/html; charset=UTF-8'>\r\n<link rel='stylesheet' href='/thredds/tds.css' type='text/css' ></head>\r\n<body>\r\n<table width='100%'>\n<tr><td>\n<img src='/thredds/acmadLogo.png' alt='African Center of Meteorological Application for Development' align='left' valign='top' hspace='10' vspace='2'>\n<h3><strong><a href='/thredds/catalog.html'>TDS Installation - SGBD machine</a></strong></h3>\n<h3><strong><a href='http://www.unidata.ucar.edu/projects/THREDDS/tech/TDS.html'>THREDDS Data Server</a></strong></h3>\n</td></tr>\n</table>\n<h2> Catalog http://sgbd.acmad.org:8080/thredds/catalog/ACMAD/WWFD/forecastinservice/ensemble5/2022/202201/20220104/catalog.html</h2>\r\n<h2>Dataset: 20220104/ARP20220104_48.png</h2>\n<ul>\n <li><em>Data size: </em>44.57 Kbytes</li>\n <li><em>ID: </em>ACMAD/WWFD/forecastinservice/ensemble5/2022/202201/20220104/ARP20220104_48.png</li>\n</ul>\n<h3>Access:</h3>\n<ol>\n <li> <b>OPENDAP:</b> <a href='/thredds/dodsC/ACMAD/WWFD/forecastinservice/ensemble5/2022/202201/20220104/ARP20220104_48.png.html'>/thredds/dodsC/ACMAD/WWFD/forecastinservice/ensemble5/2022/202201/20220104/ARP20220104_48.png</a></li>\n <li> <b>HTTPServer:</b> <a href='/thredds/fileServer/ACMAD/WWFD/forecastinservice/ensemble5/2022/202201/20220104/ARP20220104_48.png'>/thredds/fileServer/ACMAD/WWFD/forecastinservice/ensemble5/2022/202201/20220104/ARP20220104_48.png</a></li>\n</ol>\n<h3>Dates:</h3>\n<ul>\n <li>2022-01-04T07:03:33Z <strong>(modified)</strong> </li>\n</ul>\n<h3>Viewers:</h3><ul>\r\n  <li> <a href='/thredds/view/ToolsUI.jnlp?catalog=http://sgbd.acmad.org:8080/thredds/catalog/ACMAD/WWFD/forecastinservice/ensemble5/2022/202201/20220104/catalog.xml&amp;dataset=ACMAD/WWFD/forecastinservice/ensemble5/2022/202201/20220104/ARP20220104_48.png'>NetCDF-Java ToolsUI (webstart)</a></li>\n</ul>\r\n</body>\r\n</html>\r\n",
+  "body_truncated": false,
+  "headers": {
+    "Connection": "close",
+    "Content-Type": "text/html;charset=UTF-8",
+    "Date": "Sat, 04 Jul 2026 07:54:03 GMT",
+    "Server": "Apache-Coyote/1.1"
+  },
+  "kind": "catalog",
+  "seed": "http://sgbd.acmad.org:8080/thredds/catalog/ACMAD/WWFD/forecastinservice/ensemble5/2022/202201/20220104/catalog.html?dataset=ACMAD/WWFD/forecastinservice/ensemble5/2022/202201/20220104/ARP20220104_48.png",
+  "status": 200,
+  "url": "http://sgbd.acmad.org:8080/thredds/catalog/ACMAD/WWFD/forecastinservice/ensemble5/2022/202201/20220104/catalog.html?dataset=ACMAD/WWFD/forecastinservice/ensemble5/2022/202201/20220104/ARP20220104_48.png"
+}

@@ -1,0 +1,22 @@
+{
+  "body": "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>\n<Dataset xmlns=\"http://xml.opendap.org/ns/DAP/4.0#\" xml:base=\"http://test.opendap.org:8080/opendap/data/nc/fnoc1.nc\" dapVersion=\"4.0\" dmrVersion=\"1.0\" name=\"fnoc1.nc\">\n    <Dimension name=\"time_a\" size=\"16\"/>\n    <Dimension name=\"lat\" size=\"17\"/>\n    <Dimension name=\"lon\" size=\"21\"/>\n    <Dimension name=\"time\" size=\"16\"/>\n    <Int16 name=\"u\">\n        <Dim name=\"/time_a\"/>\n        <Dim name=\"/lat\"/>\n        <Dim name=\"/lon\"/>\n        <Attribute name=\"units\" type=\"String\">\n            <Value>meter per second</Value>\n        </Attribute>\n        <Attribute name=\"long_name\" type=\"String\">\n            <Value>Vector wind eastward component</Value>\n        </Attribute>\n        <Attribute name=\"missing_value\" type=\"String\">\n            <Value>-32767</Value>\n        </Attribute>\n        <Attribute name=\"scale_factor\" type=\"String\">\n            <Value>0.005</Value>\n        </Attribute>\n        <Attribute name=\"DODS_Name\" type=\"String\">\n            <Value>UWind</Value>\n        </Attribute>\n        <Attribute name=\"b\" type=\"Byte\">\n            <Value>128</Value>\n        </Attribute>\n        <Attribute name=\"i\" type=\"Int32\">\n            <Value>32000</Value>\n        </Attribute>\n        <Attribute name=\"WOA01\" type=\"Url\">\n            <Value>&quot;http://localhost/junk&quot;</Value>\n        </Attribute>\n    </Int16>\n    <Int16 name=\"v\">\n        <Dim name=\"/time_a\"/>\n        <Dim name=\"/lat\"/>\n        <Dim name=\"/lon\"/>\n        <Attribute name=\"units\" type=\"String\">\n            <Value>meter per second</Value>\n        </Attribute>\n        <Attribute name=\"long_name\" type=\"String\">\n            <Value>Vector wind northward component</Value>\n        </Attribute>\n        <Attribute name=\"missing_value\" type=\"String\">\n            <Value>-32767</Value>\n        </Attribute>\n        <Attribute name=\"scale_factor\" type=\"String\">\n            <Value>0.005</Value>\n        </Attribute>\n        <Attribute name=\"DODS_Name\" type=\"String\">\n            <Value>VWind</Value>\n        </Attribute>\n    </Int16>\n    <Float32 name=\"lat\">\n        <Dim name=\"/lat\"/>\n        <Attribute name=\"units\" type=\"String\">\n            <Value>degree North</Value>\n        </Attribute>\n    </Float32>\n    <Float32 name=\"lon\">\n        <Dim name=\"/lon\"/>\n        <Attribute name=\"units\" type=\"String\">\n            <Value>degree East</Value>\n        </Attribute>\n    </Float32>\n    <Float32 name=\"time\">\n        <Dim name=\"/time\"/>\n        <Attribute name=\"units\" type=\"String\">\n            <Value>hours from base_time</Value>\n        </Attribute>\n    </Float32>\n    <Attribute name=\"NC_GLOBAL\" type=\"Container\">\n        <Attribute name=\"base_time\" type=\"String\">\n            <Value>88- 10-00:00:00</Value>\n        </Attribute>\n        <Attribute name=\"title\" type=\"String\">\n            <Value> FNOC UV wind components from 1988- 10 to 1988- 13.</Value>\n        </Attribute>\n    </Attribute>\n    <Attribute name=\"DODS_EXTRA\" type=\"Container\">\n        <Attribute name=\"Unlimited_Dimension\" type=\"String\">\n            <Value>time_a</Value>\n        </Attribute>\n    </Attribute>\n</Dataset>\n",
+  "body_truncated": false,
+  "headers": {
+    "Connection": "close",
+    "Content-Description": "text/xml",
+    "Content-Type": "text/xml",
+    "Date": "Sat, 04 Jul 2026 07:59:55 GMT",
+    "Last-Modified": "Thu, 23 Sep 2021 19:45:14 GMT",
+    "Server": "Hyrax/1.17.1-1440-test-deploy",
+    "Transfer-Encoding": "chunked",
+    "X-DAP": "3.2",
+    "X-FRAME-OPTIONS": "DENY",
+    "XDODS-Server": "dods/3.2",
+    "XOPeNDAP-Server": "asciival/, bes/, csv_handler/, dapreader_module/, dmrpp_module/, fileout_covjson/, fileout_json/, fileout_netcdf/, freeform_handler/, functions/, gateway/, gdal_module/, hdf4_handler/, hdf5_handler/, libdap/, netcdf_handler/, s3_reader/, usage/, xml_data_handler/",
+    "vary": "accept-encoding"
+  },
+  "kind": "dmr",
+  "seed": "http://test.opendap.org:8080/opendap/data/nc/fnoc1.nc.dmr",
+  "status": 200,
+  "url": "http://test.opendap.org:8080/opendap/data/nc/fnoc1.nc.dmr.xml"
+}
