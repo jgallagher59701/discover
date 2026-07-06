@@ -151,7 +151,7 @@ class DapSpider(scrapy.Spider):
     def probe(self, base: str):
         """Try DAP4 first, fall back to DAP2."""
         yield scrapy.Request(
-            base + ".dmr.xml",
+            base + ".dmr.xml", # Changed from .dmr.xml to just .dmr
             callback=self.on_dmr,
             errback=self.on_error,
             cb_kwargs={"base": base},
@@ -159,16 +159,24 @@ class DapSpider(scrapy.Spider):
         )
 
     def on_dmr(self, response, base):
+        """
+        Both Hyrax/DAP4 and TDS/DAP4 include a Content-Description
+        header value application/vnd.opendap.dap4.dataset-metadata+xml.
+
+        I decided to test only for "dmrVersion" in the body because 
+        other servers might not have read that part of the spec.
+        """
         body = response.text[:1000]
-        xdap = response.headers.get("XDAP", b"").decode("latin1")
-        if response.status == 200 and (
-            "DAP/4.0" in body or xdap.startswith("4") or "dapVersion" in body
-        ):
+        if response.status == 200 and "dmrVersion" in body:
             yield {
                 "url": base,
                 "dap_version": "4",
                 "probe_url": response.url,
-                "xdap": xdap,
+                # drop 'xdap' and use Content-Description. jhrg 7/6/26
+                "content_description": response.headers.get("Content-Description", b"").decode("latin1"),
+                # With scrapy, header lookup is case-insensitive. ERDDSP has this 
+                # header as lowercase. jhrg 7/6/26
+                "xdods_server": response.headers.get("XDODS-Server", b"").decode("latin1"),
                 "server": response.headers.get("Server", b"").decode("latin1"),
             }
             return
@@ -188,13 +196,13 @@ class DapSpider(scrapy.Spider):
         # responses, so header/description alone are not trustworthy enough
         # to confirm on their own. jhrg 7/5/26
         body = response.text.lstrip()[:200]
-        xdods = response.headers.get("XDODS-Server", b"").decode("latin1")
         if response.status == 200 and body.startswith("Dataset {"):
             yield {
                 "url": base,
                 "dap_version": "2",
                 "probe_url": response.url,
-                "xdods_server": xdods,
+                "content_description": response.headers.get("Content-Description", b"").decode("latin1"),
+                "xdods_server": response.headers.get("XDODS-Server", b"").decode("latin1"),
                 "server": response.headers.get("Server", b"").decode("latin1"),
             }
 

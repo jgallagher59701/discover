@@ -80,9 +80,13 @@ python dap_spider.py candidate_urls.txt
 # writes dap_endpoints.jsonl
 ```
 
-There is no build step, linter, or test suite in this repo — validate changes
-by running the two stages above (Stage 1 against a small/single crawl, Stage 2
-against a short seed list) and inspecting the output files.
+Run unit and regression tests using:
+```bash
+pytest
+```
+
+There is no build step, or linter — validate changes using the tests, which 
+by default make no HTTP requests to remote hosts.
 
 ## Architecture
 
@@ -110,11 +114,10 @@ non-HTML bodies instead of scraping links.
 - `start_requests` classifies each seed line: THREDDS catalog URL → recurse via
   `parse_thredds_catalog`; anything else → `strip_dap_suffix` to a base URL and
   `probe()`.
-- `probe()` tries DAP4 first (`<base>.dmr.xml`, `on_dmr`), falling back to DAP2
-  (`<base>.dds`, `on_dds`) if DAP4 doesn't confirm. Confirmation always checks
-  **both** response headers (`XDAP`, `XDODS-Server`, `Content-Description`) and
-  a body signature (`DAP/4.0`/`dapVersion`, or a body starting `Dataset {`) —
-  header or body alone is not trusted.
+- `probe()` tries DAP4 first (`<base>.dmr`, `on_dmr`), falling back to DAP2
+  (`<base>.dds`, `on_dds`) if DAP4 doesn't confirm. Confirmation checks the 
+  response status and text at or near the start of a response (`dmrVersion` 
+  near the start for DAP4 or `Dataset {` at the start for DAP2).
 - `parse_thredds_catalog` follows `catalogRef` sub-catalogs recursively and
   combines each `dataset[@urlPath]` with the catalog's OPeNDAP `service/@base`
   to build access URLs, which are fed back into `probe()`. THREDDS parsing here
