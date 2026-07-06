@@ -28,7 +28,7 @@ Notes:
     * Edit the USER_AGENT contact string before running against real hosts.
 """
 
-import sys
+import argparse
 from urllib.parse import urljoin, urlparse
 
 import scrapy
@@ -110,9 +110,10 @@ class DapSpider(scrapy.Spider):
         "LOG_LEVEL": "INFO",
     }
 
-    def __init__(self, seeds_file=None, *args, **kwargs):
+    def __init__(self, seeds_file=None, progress_every=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.seeds_file = seeds_file
+        self.progress_every = progress_every
 
     # ---- seeding & classification -------------------------------------
 
@@ -225,11 +226,19 @@ class DapSpider(scrapy.Spider):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("usage: python dap_spider.py <seeds_file>", file=sys.stderr)
-        sys.exit(1)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("seeds_file")
+    parser.add_argument(
+        "--progress-every",
+        type=int,
+        default=None,
+        help="print a '.' for every Nth seed URL read from the seeds file",
+    )
+    args = parser.parse_args()
     process = CrawlerProcess()
-    process.crawl(DapSpider, seeds_file=sys.argv[1])
+    process.crawl(
+        DapSpider, seeds_file=args.seeds_file, progress_every=args.progress_every
+    )
     process.start()
 
 
