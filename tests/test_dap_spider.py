@@ -494,6 +494,38 @@ def test_start_probe_seed_uses_stripped_base_not_raw_url(tmp_path, spider):
     assert results[0].cb_kwargs == {"base": "http://example.org/data/foo"}
 
 
+def test_start_probe_seed_strips_query_string_before_suffix(tmp_path, spider):
+    seeds = tmp_path / "seeds.txt"
+    seeds.write_text("http://example.org/data/foo.dds?dataset=1\n")
+    spider.seeds_file = str(seeds)
+    results = asyncio.run(_drain(spider.start()))
+    assert len(results) == 1
+    # query string dropped AND suffix stripped, in that order -- not glued
+    # onto the query string tail (issue #4)
+    assert results[0].url == "http://example.org/data/foo.dmr.xml"
+    assert results[0].cb_kwargs == {"base": "http://example.org/data/foo"}
+
+
+def test_start_probe_seed_with_unsuffixed_query_string_issue_4(tmp_path, spider):
+    # Real-world case from tests/fixtures/regression_seeds.txt's
+    # "demonstrates the dead strip_query_string finding" seed: before the
+    # fix, the suffix got glued after "distinct()" instead of onto the base.
+    seeds = tmp_path / "seeds.txt"
+    seeds.write_text(
+        "https://erddap.dataexplorer.oceanobservatories.org/erddap/tabledap/"
+        "allDatasets.html?accessible,dataStructure,cdm_data_type,class,"
+        "institution,testOutOfDate&distinct()\n"
+    )
+    spider.seeds_file = str(seeds)
+    results = asyncio.run(_drain(spider.start()))
+    assert len(results) == 1
+    # suffix appended to the real base, not glued after "distinct()"
+    assert results[0].url == (
+        "https://erddap.dataexplorer.oceanobservatories.org/erddap/tabledap/"
+        "allDatasets.html.dmr.xml"
+    )
+
+
 def test_start_probes_seed_with_no_suffix_as_is(tmp_path, spider):
     seeds = tmp_path / "seeds.txt"
     seeds.write_text("http://example.org/data/foo\n")
