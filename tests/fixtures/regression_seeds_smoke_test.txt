@@ -44,12 +44,9 @@ http://apdrc.soest.hawaii.edu/erddap/griddap/index.json?page=1&itemsPerPage=1000
 https://pae-paha.pacioos.hawaii.edu/thredds/dodsC/hmrg_bathytopo_50m_mhi.html
 https://pae-paha.pacioos.hawaii.edu/thredds/dodsC/neowave_nawiliwili.html
 
-# --- known gap: catalog.html is a rendered HTML view, not InvCatalog XML ---
-# This was a bug in the first version of the spider and has been fixed. For the 
-# smoke test, it takes too long to process the whole THREDDS catalog, but this
-# was used for the captured fixtures. Maybe try the oceanmodeling catalog...
-https://gcoos5.geos.tamu.edu/thredds/catalog/catalog.html
-
+# Removed from the smoke test - this takes too long. jhrg 7/6/26
+# https://gcoos5.geos.tamu.edu/thredds/catalog/catalog.html
+#
 # Maybe this will be faster then the TAMU catalog? jhrg 7/6/26
 # https://oceanmodeling.ucsc.edu/thredds/catalog/catalog.xml
 
