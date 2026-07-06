@@ -117,6 +117,22 @@ class DapSpider(scrapy.Spider):
         super().__init__(*args, **kwargs)
         self.seeds_file = seeds_file
         self.progress_every = progress_every
+        self._deref_count = 0
+
+    def _tick_progress(self):
+        """Print a '.' every Nth dereference (response or failure), across
+        on_dmr/on_dds/parse_thredds_catalog/on_error combined."""
+        self._deref_count += 1
+        if self.progress_every and self._deref_count % self.progress_every == 0:
+            print(".", end="", flush=True)
+
+    def closed(self, reason):
+        # trailing newline so a mid-line run of dots doesn't collide with the
+        # shell prompt or a subsequent log line; called once when the spider
+        # finishes, since dereferences happen asynchronously with no single
+        # loop-end point to print it from.
+        if self.progress_every:
+            print()
 
     # ---- seeding & classification -------------------------------------
 
@@ -126,14 +142,10 @@ class DapSpider(scrapy.Spider):
             return
         with open(self.seeds_file, encoding="utf-8") as f:
             self.logger.info(f"open seed file {self.seeds_file}")
-            count = 0
             for line in f:
                 url = line.strip()
                 if not url or url.startswith("#"):
                     continue
-                count += 1
-                if self.progress_every and count % self.progress_every == 0:
-                    print(".", end="", flush=True)
                 if is_thredds_catalog(url):
                     url = to_xml(url)
                     self.logger.info(f"seed [thredds catalog]: {url}")
@@ -146,8 +158,6 @@ class DapSpider(scrapy.Spider):
                     self.logger.info(f"seed [probe]: {url} -> base {base}")
                     for req in self.probe(base):
                         yield req
-            if self.progress_every:
-                print()
 
     # ---- DAP probing ---------------------------------------------------
 
@@ -166,9 +176,10 @@ class DapSpider(scrapy.Spider):
         Both Hyrax/DAP4 and TDS/DAP4 include a Content-Description
         header value application/vnd.opendap.dap4.dataset-metadata+xml.
 
-        I decided to test only for "dmrVersion" in the body because 
+        I decided to test only for "dmrVersion" in the body because
         other servers might not have read that part of the spec.
         """
+        self._tick_progress()
         body = response.text[:1000]
         if response.status == 200 and "dmrVersion" in body:
             yield {
@@ -198,6 +209,7 @@ class DapSpider(scrapy.Spider):
         # pages (index listings, "Make A Graph" forms), not just genuine DDS
         # responses, so header/description alone are not trustworthy enough
         # to confirm on their own. jhrg 7/5/26
+        self._tick_progress()
         body = response.text.lstrip()[:200]
         if response.status == 200 and body.startswith("Dataset {"):
             yield {
@@ -212,6 +224,7 @@ class DapSpider(scrapy.Spider):
     # ---- THREDDS catalog recursion ------------------------------------
 
     def parse_thredds_catalog(self, response):
+        self._tick_progress()
         sel = response.selector
         for ns, uri in THREDDS_NS.items():
             sel.register_namespace(ns, uri)
@@ -239,6 +252,7 @@ class DapSpider(scrapy.Spider):
 
     def on_error(self, failure):
         # dead hosts / timeouts / 4xx-5xx: log and move on, never crash the run
+        self._tick_progress()
         self.logger.debug("request failed: %s", failure.value)
 
 
@@ -249,12 +263,12 @@ def main():
         "-p", "--progress-every",
         type=int,
         default=None,
-        help="print a '.' for every Nth seed URL read from the seeds file",
+        help="print a '.' for every Nth URL dereferenced (response or failure)",
     )
     parser.add_argument(
         "-l", "--log-level",
         type=str.upper,
-        default="INFO",
+        default="WARNING",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Scrapy log level (default: %(default)s)",
     )

@@ -224,3 +224,38 @@ plan be better?"
 
 **Status:** Plan revised, no code changes made yet. Awaiting review before
 implementing Step 2/3 changes against `dap_spider.py`.
+
+## 2026-07-06 (later still)
+
+**Prompt:** "Implement the changes for the new progress indicator."
+
+**Reasoning:**
+- Implemented Step 2 as planned: removed the counter and both `print()`
+  calls from `start()`'s seed loop; added `self._deref_count = 0` in
+  `__init__`; added a `_tick_progress()` helper; added a `closed(self,
+  reason)` override that prints the trailing newline once, only when
+  `progress_every` is set.
+- Called `_tick_progress()` at the top of `on_dmr`, `on_dds`,
+  `parse_thredds_catalog`, and `on_error` — one shared counter, order-
+  independent across all four.
+- Updated the now-stale `--progress-every` help text ("print a '.' for every
+  Nth seed URL read from the seeds file" -> "... every Nth URL dereferenced
+  (response or failure)").
+- Verified with `python -m py_compile dap_spider.py` (clean) and, in the
+  `discover` conda env, a network-free harness
+  (`scratchpad/verify_progress.py`) that builds a `DapSpider` directly and
+  feeds 7 synthetic responses/failures through the four callbacks in mixed
+  order (2x `on_dds`, 2x `on_dmr`, 2x `on_error`, 1x `parse_thredds_catalog`),
+  no `CrawlerProcess`/reactor/network I/O involved:
+  - `--progress-every 3` -> stdout `"..\n"` (dots after the 3rd and 6th
+    dereference, trailing newline from `closed()`).
+  - `--progress-every` omitted -> stdout `""` (regression check: identical to
+    pre-change behavior).
+  - Confirmed via `--help` that the CLI flag text now matches the new
+    semantics.
+- Did not run the literal end-to-end CLI command against real fixture hosts
+  (same reasoning as the original Step 3: unnecessary network traffic just to
+  check a print statement); happy to run that too if wanted.
+
+**Status:** Step 2/3 revision implemented and verified via the network-free
+harness. Awaiting review.

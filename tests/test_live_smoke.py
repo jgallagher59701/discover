@@ -25,7 +25,7 @@ from scrapy.crawler import CrawlerProcess
 
 from dap_spider import DapSpider
 
-SEEDS_FILE = Path(__file__).resolve().parent / "fixtures" / "regression_seeds.txt"
+SEEDS_FILE = Path(__file__).resolve().parent / "fixtures" / "regression_seeds_smoke_test.txt"
 
 
 @pytest.mark.live
