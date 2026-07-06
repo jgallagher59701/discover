@@ -28,7 +28,7 @@ Notes:
     * Edit the USER_AGENT contact string before running against real hosts.
 """
 
-import sys
+import argparse
 from urllib.parse import urljoin, urlparse
 
 import scrapy
@@ -66,6 +66,28 @@ def is_thredds_catalog(url: str) -> bool:
     return "/thredds/catalog" in p and (p.endswith(".html") or p.endswith(".xml") or p.endswith("/"))
 
 
+from urllib.parse import urlsplit, urlunsplit
+
+def to_xml(url: str) -> str:
+    """
+    Since the spider parses the thredds catalog as XML, we need to 
+    turn .../catalog.html URLs into catalog.xml URLs. This code will do
+    that under all sorts of conditions and won't mange the http:// part
+    of the URL.
+
+    From CLAUDE.
+    """
+    parts = urlsplit(url)
+    path = parts.path
+    if path.endswith("/"):
+        path = path.rstrip("/") + ".xml"      # catalog/ -> catalog.xml
+    elif "." in path.rsplit("/", 1)[-1]:
+        path = path.rsplit(".", 1)[0] + ".xml"  # catalog.html -> catalog.xml
+    else:
+        path = path + ".xml"                   # catalog -> catalog.xml
+    return urlunsplit(parts._replace(path=path))
+
+
 class DapSpider(scrapy.Spider):
     name = "dap"
 
@@ -76,21 +98,25 @@ class DapSpider(scrapy.Spider):
         "AUTOTHROTTLE_TARGET_CONCURRENCY": 1.0,
         "AUTOTHROTTLE_MAX_DELAY": 30,
         "CONCURRENT_REQUESTS_PER_DOMAIN": 1,
-        "DOWNLOAD_DELAY": 2.0,
+        "DOWNLOAD_DELAY": 0.5,
         "DOWNLOAD_TIMEOUT": 20,
         "RETRY_TIMES": 2,
         "USER_AGENT": (
-            "OPeNDAP-Discovery/0.1 "
+            "OPeNDAP-Discovery/0.2"
             "(+https://www.opendap.org/; contact support@opendap.org)"
         ),
         # ---- output ----
         "FEEDS": {"dap_endpoints.jsonl": {"format": "jsonlines"}},
-        "LOG_LEVEL": "INFO",
+        # LOG_LEVEL is set via --log-level in main() instead of here: spider
+        # custom_settings take precedence over settings passed to
+        # CrawlerProcess, so hardcoding it here would make --log-level a
+        # no-op.
     }
 
-    def __init__(self, seeds_file=None, *args, **kwargs):
+    def __init__(self, seeds_file=None, progress_every=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.seeds_file = seeds_file
+        self.progress_every = progress_every
 
     # ---- seeding & classification -------------------------------------
 
@@ -100,20 +126,28 @@ class DapSpider(scrapy.Spider):
             return
         with open(self.seeds_file, encoding="utf-8") as f:
             self.logger.info(f"open seed file {self.seeds_file}")
+            count = 0
             for line in f:
                 url = line.strip()
                 if not url or url.startswith("#"):
                     continue
+                count += 1
+                if self.progress_every and count % self.progress_every == 0:
+                    print(".", end="", flush=True)
                 if is_thredds_catalog(url):
+                    url = to_xml(url)
                     self.logger.info(f"seed [thredds catalog]: {url}")
                     yield scrapy.Request(
                         url, callback=self.parse_thredds_catalog, errback=self.on_error
                     )
                 else:
-                    base = strip_dap_suffix(url)
+                    # Added call to strip the query string. jhrg 7/6/26
+                    base = strip_dap_suffix(strip_query_string(url))
                     self.logger.info(f"seed [probe]: {url} -> base {base}")
                     for req in self.probe(base):
                         yield req
+            if self.progress_every:
+                print()
 
     # ---- DAP probing ---------------------------------------------------
 
@@ -209,11 +243,26 @@ class DapSpider(scrapy.Spider):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("usage: python dap_spider.py <seeds_file>", file=sys.stderr)
-        sys.exit(1)
-    process = CrawlerProcess()
-    process.crawl(DapSpider, seeds_file=sys.argv[1])
+    parser = argparse.ArgumentParser()
+    parser.add_argument("seeds_file")
+    parser.add_argument(
+        "-p", "--progress-every",
+        type=int,
+        default=None,
+        help="print a '.' for every Nth seed URL read from the seeds file",
+    )
+    parser.add_argument(
+        "-l", "--log-level",
+        type=str.upper,
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Scrapy log level (default: %(default)s)",
+    )
+    args = parser.parse_args()
+    process = CrawlerProcess(settings={"LOG_LEVEL": args.log_level})
+    process.crawl(
+        DapSpider, seeds_file=args.seeds_file, progress_every=args.progress_every
+    )
     process.start()
 
 

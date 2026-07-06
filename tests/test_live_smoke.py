@@ -58,13 +58,13 @@ def test_live_crawl_runs_end_to_end(tmp_path):
             "FEEDS": {str(output_file): {"format": "jsonlines"}},
         }
 
-    process = CrawlerProcess(settings={"LOG_LEVEL": "INFO"})
+    process = CrawlerProcess(settings={"LOG_LEVEL": "ERROR"})
     # process.crawl() only returns a completion Deferred, and
     # process.crawlers has already been emptied by the time start() returns
     # (crawlers remove themselves once stopped) -- create_crawler() first is
     # what gives a reference that's still valid for reading stats afterward.
     crawler = process.create_crawler(_SmokeSpider)
-    process.crawl(crawler, seeds_file=str(SEEDS_FILE))
+    process.crawl(crawler, seeds_file=str(SEEDS_FILE), progress_every=1)
     process.start()  # blocks until the crawl finishes; real network I/O
 
     stats = crawler.stats.get_stats()
