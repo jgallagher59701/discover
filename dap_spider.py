@@ -29,6 +29,7 @@ Notes:
 """
 
 import argparse
+import sys
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
@@ -178,6 +179,19 @@ class DapSpider(scrapy.Spider):
         # loop-end point to print it from.
         if self.progress_every:
             print()
+        # reason == "finished" for a normal, fully-drained run; a graceful
+        # Ctrl-C (single SIGINT) closes the spider with reason == "shutdown"
+        # instead -- print a resume hint in that case (issue #22). Printed
+        # to stderr so it survives independently of stdout dot output and
+        # --log-level.
+        if reason != "finished" and self.seeds_file:
+            print(
+                f"Stopped after seed URL {self._last_dispatched_seed} of "
+                f"{self.seeds_file}.\n"
+                f"Resume with: python dap_spider.py {self.seeds_file} "
+                f"--resume-from {self._last_dispatched_seed}",
+                file=sys.stderr,
+            )
 
     # ---- seeding & classification -------------------------------------
 
