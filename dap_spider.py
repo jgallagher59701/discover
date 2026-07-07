@@ -29,10 +29,15 @@ Notes:
 """
 
 import argparse
+from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 import scrapy
 from scrapy.crawler import CrawlerProcess
+
+# Stage-2 output path, referenced both in DapSpider.custom_settings (FEEDS)
+# and in main() to truncate it for a fresh (non-resumed) run.
+OUTPUT_FEED = "dap_endpoints.jsonl"
 
 # DAP response suffixes we may need to strip from a seed to get the base URL.
 # This is linked to the extensions used in the query to the Common Crawl database.
@@ -141,17 +146,18 @@ class DapSpider(scrapy.Spider):
             IdentityEncodingMiddleware: 595,
         },
         # ---- output ----
-        "FEEDS": {"dap_endpoints.jsonl": {"format": "jsonlines"}},
+        "FEEDS": {OUTPUT_FEED: {"format": "jsonlines"}},
         # LOG_LEVEL is set via --log-level in main() instead of here: spider
         # custom_settings take precedence over settings passed to
         # CrawlerProcess, so hardcoding it here would make --log-level a
         # no-op.
     }
 
-    def __init__(self, seeds_file=None, progress_every=None, *args, **kwargs):
+    def __init__(self, seeds_file=None, progress_every=None, resume_from=0, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.seeds_file = seeds_file
         self.progress_every = progress_every
+        self.resume_from = resume_from
         self._deref_count = 0
         # Seed-line bookkeeping for restart/resume (issue #22). Counts seed
         # *URLs* (non-blank, non-comment lines), not raw file lines.
@@ -186,6 +192,10 @@ class DapSpider(scrapy.Spider):
                 if not url or url.startswith("#"):
                     continue
                 self._seed_index += 1
+                if self._seed_index <= self.resume_from:
+                    # Already processed in a prior run (--resume-from); count
+                    # it but don't re-dispatch a request for it.
+                    continue
                 if is_thredds_catalog(url):
                     url = to_xml(url)
                     self.logger.info(f"seed [thredds catalog]: {url}")
@@ -313,10 +323,28 @@ def main():
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Scrapy log level (default: %(default)s)",
     )
+    parser.add_argument(
+        "-r", "--resume-from",
+        type=int,
+        default=0,
+        metavar="N",
+        help=(
+            "number of seed URLs already processed in a prior run; skip "
+            "them and append to the existing %s instead of starting fresh"
+            % OUTPUT_FEED
+        ),
+    )
     args = parser.parse_args()
+    if not args.resume_from:
+        # Fresh run: make the current append-by-default FEEDS behavior
+        # explicit instead of accidental by starting from a clean file.
+        Path(OUTPUT_FEED).unlink(missing_ok=True)
     process = CrawlerProcess(settings={"LOG_LEVEL": args.log_level})
     process.crawl(
-        DapSpider, seeds_file=args.seeds_file, progress_every=args.progress_every
+        DapSpider,
+        seeds_file=args.seeds_file,
+        progress_every=args.progress_every,
+        resume_from=args.resume_from,
     )
     process.start()
 
