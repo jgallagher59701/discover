@@ -164,12 +164,21 @@ class DapSpider(scrapy.Spider):
         # *URLs* (non-blank, non-comment lines), not raw file lines.
         self._seed_index = 0
         self._last_dispatched_seed = 0
+        self._last_reported_seed = 0
 
     def _tick_progress(self):
         """Print a '.' every Nth dereference (response or failure), across
-        on_dmr/on_dds/parse_thredds_catalog/on_error combined."""
+        on_dmr/on_dds/parse_thredds_catalog/on_error combined. If the seed
+        index has advanced since the last printed marker, print
+        '[<seed index>]' instead of a bare dot (issue #22), still
+        rate-limited by progress_every rather than firing on every seed."""
         self._deref_count += 1
-        if self.progress_every and self._deref_count % self.progress_every == 0:
+        if not (self.progress_every and self._deref_count % self.progress_every == 0):
+            return
+        if self._last_dispatched_seed > self._last_reported_seed:
+            print(f"[{self._last_dispatched_seed}]", end="", flush=True)
+            self._last_reported_seed = self._last_dispatched_seed
+        else:
             print(".", end="", flush=True)
 
     def closed(self, reason):
