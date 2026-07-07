@@ -89,6 +89,34 @@ def to_xml(url: str) -> str:
     return urlunsplit(parts._replace(path=path))
 
 
+class IdentityEncodingMiddleware:
+    """
+    Scrapy's HttpCompressionMiddleware only recognizes gzip/deflate/br/zstd;
+    any other Content-Encoding value -- including the legitimate HTTP/1.1
+    'identity' token (RFC 7231 sec 5.3.4, meaning "no transformation") --
+    is logged as an unsupported-encoding WARNING. Some ERDDAP hosts send
+    'Content-Encoding: identity' explicitly (see issue #20). Strip that
+    no-op token here, before HttpCompressionMiddleware runs, so it never
+    sees an encoding it doesn't recognize. jhrg 7/7/26
+    """
+
+    def process_response(self, request, response, spider):
+        raw = response.headers.getlist("Content-Encoding")
+        if not raw:
+            return response
+        kept = []
+        for entry in raw:
+            tokens = [t.strip() for t in entry.split(b",")]
+            tokens = [t for t in tokens if t.lower() != b"identity"]
+            if tokens:
+                kept.append(b", ".join(tokens))
+        if kept:
+            response.headers["Content-Encoding"] = kept
+        elif raw:
+            del response.headers["Content-Encoding"]
+        return response
+
+
 class DapSpider(scrapy.Spider):
     name = "dap"
 
@@ -106,6 +134,12 @@ class DapSpider(scrapy.Spider):
             "OPeNDAP-Discovery/0.2"
             "(+https://www.opendap.org/; contact support@opendap.org)"
         ),
+        # Run just ahead of HttpCompressionMiddleware (priority 590) so it
+        # strips the no-op 'identity' encoding before that middleware logs
+        # it as unsupported.
+        "DOWNLOADER_MIDDLEWARES": {
+            IdentityEncodingMiddleware: 595,
+        },
         # ---- output ----
         "FEEDS": {"dap_endpoints.jsonl": {"format": "jsonlines"}},
         # LOG_LEVEL is set via --log-level in main() instead of here: spider

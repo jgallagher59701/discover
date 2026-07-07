@@ -2,9 +2,17 @@ import asyncio
 import types
 
 import pytest
+from scrapy.downloadermiddlewares.httpcompression import HttpCompressionMiddleware
+from scrapy.http import Request
 
 from conftest import load_captured_response, make_response, make_xml_response
-from dap_spider import is_thredds_catalog, strip_dap_suffix, strip_query_string, to_xml
+from dap_spider import (
+    IdentityEncodingMiddleware,
+    is_thredds_catalog,
+    strip_dap_suffix,
+    strip_query_string,
+    to_xml,
+)
 
 
 @pytest.mark.parametrize(
@@ -628,3 +636,60 @@ def test_parse_thredds_catalog_real_captures_yield_nothing(spider, slug):
     response, _ = load_captured_response(slug)
     results = list(spider.parse_thredds_catalog(response))
     assert results == []
+
+
+# ---- IdentityEncodingMiddleware (issue #20) --------------------------------
+#
+# Some ERDDAP hosts send 'Content-Encoding: identity' -- a legitimate
+# HTTP/1.1 no-op token -- which Scrapy's own HttpCompressionMiddleware
+# doesn't recognize and logs as an unsupported-encoding WARNING. These
+# tests cover the middleware in isolation, plus one integration check that
+# it actually silences the warning HttpCompressionMiddleware would
+# otherwise log.
+
+def test_identity_encoding_middleware_strips_sole_identity_header():
+    request = Request("http://example.org/foo.dmr.xml")
+    response = make_response(request.url, headers={"Content-Encoding": "identity"})
+    out = IdentityEncodingMiddleware().process_response(request, response, spider=None)
+    assert "Content-Encoding" not in out.headers
+
+
+def test_identity_encoding_middleware_leaves_other_encodings_untouched():
+    request = Request("http://example.org/foo.dmr.xml")
+    response = make_response(request.url, headers={"Content-Encoding": "gzip"})
+    out = IdentityEncodingMiddleware().process_response(request, response, spider=None)
+    assert out.headers.getlist("Content-Encoding") == [b"gzip"]
+
+
+def test_identity_encoding_middleware_strips_identity_from_combined_list():
+    request = Request("http://example.org/foo.dmr.xml")
+    response = make_response(
+        request.url, headers={"Content-Encoding": "gzip, identity"}
+    )
+    out = IdentityEncodingMiddleware().process_response(request, response, spider=None)
+    assert out.headers.getlist("Content-Encoding") == [b"gzip"]
+
+
+def test_identity_encoding_middleware_noop_without_content_encoding_header():
+    request = Request("http://example.org/foo.dmr.xml")
+    response = make_response(request.url)
+    out = IdentityEncodingMiddleware().process_response(request, response, spider=None)
+    assert "Content-Encoding" not in out.headers
+
+
+def test_identity_encoding_middleware_prevents_httpcompression_warning(caplog):
+    request = Request("http://erddap.secoora.org/erddap/tabledap/foo.dmr.xml")
+    response = make_response(
+        request.url,
+        body='<Dataset dmrVersion="1.0">',
+        headers={"Content-Encoding": "identity"},
+    )
+
+    stripped = IdentityEncodingMiddleware().process_response(
+        request, response, spider=None
+    )
+    with caplog.at_level(
+        "WARNING", logger="scrapy.downloadermiddlewares.httpcompression"
+    ):
+        HttpCompressionMiddleware().process_response(request, stripped)
+    assert "unsupported encoding" not in caplog.text
