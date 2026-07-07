@@ -153,6 +153,10 @@ class DapSpider(scrapy.Spider):
         self.seeds_file = seeds_file
         self.progress_every = progress_every
         self._deref_count = 0
+        # Seed-line bookkeeping for restart/resume (issue #22). Counts seed
+        # *URLs* (non-blank, non-comment lines), not raw file lines.
+        self._seed_index = 0
+        self._last_dispatched_seed = 0
 
     def _tick_progress(self):
         """Print a '.' every Nth dereference (response or failure), across
@@ -181,6 +185,7 @@ class DapSpider(scrapy.Spider):
                 url = line.strip()
                 if not url or url.startswith("#"):
                     continue
+                self._seed_index += 1
                 if is_thredds_catalog(url):
                     url = to_xml(url)
                     self.logger.info(f"seed [thredds catalog]: {url}")
@@ -193,6 +198,7 @@ class DapSpider(scrapy.Spider):
                     self.logger.info(f"seed [probe]: {url} -> base {base}")
                     for req in self.probe(base):
                         yield req
+                self._last_dispatched_seed = self._seed_index
 
     # ---- DAP probing ---------------------------------------------------
 
