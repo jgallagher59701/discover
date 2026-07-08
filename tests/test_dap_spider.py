@@ -8,7 +8,10 @@ from scrapy.http import Request
 from conftest import load_captured_response, make_response, make_xml_response
 from dap_spider import (
     IdentityEncodingMiddleware,
+    advance_seed_watermark,
+    format_progress_tick,
     is_thredds_catalog,
+    should_dispatch_seed,
     strip_dap_suffix,
     strip_query_string,
     to_xml,
@@ -91,6 +94,140 @@ def test_strip_query_string_drops_fragment_that_follows_query():
     assert strip_query_string(url) == "http://example.org/data/foo.dds"
 
 
+# ---- should_dispatch_seed (issue #22, restart/resume) --------------------
+
+
+def test_should_dispatch_seed_resume_from_zero_dispatches_everything():
+    assert should_dispatch_seed(1, resume_from=0) is True
+    assert should_dispatch_seed(50, resume_from=0) is True
+
+
+def test_should_dispatch_seed_at_resume_boundary_is_skipped():
+    # seed_index == resume_from is the last seed already processed
+    assert should_dispatch_seed(5, resume_from=5) is False
+
+
+def test_should_dispatch_seed_first_seed_after_boundary_is_dispatched():
+    assert should_dispatch_seed(6, resume_from=5) is True
+
+
+def test_should_dispatch_seed_well_before_boundary_is_skipped():
+    assert should_dispatch_seed(1, resume_from=5) is False
+
+
+# ---- format_progress_tick (issue #22, seed-count progress) ---------------
+
+
+def test_format_progress_tick_no_progress_every_prints_nothing():
+    text, last_reported = format_progress_tick(
+        deref_count=5, progress_every=None, last_completed_seed=3, last_reported_seed=0
+    )
+    assert text is None
+    assert last_reported == 0
+
+
+def test_format_progress_tick_off_boundary_prints_nothing():
+    text, last_reported = format_progress_tick(
+        deref_count=4, progress_every=5, last_completed_seed=3, last_reported_seed=0
+    )
+    assert text is None
+    assert last_reported == 0
+
+
+def test_format_progress_tick_on_boundary_with_new_seed_prints_marker():
+    text, last_reported = format_progress_tick(
+        deref_count=5, progress_every=5, last_completed_seed=3, last_reported_seed=0
+    )
+    assert text == "[3]"
+    assert last_reported == 3
+
+
+def test_format_progress_tick_on_boundary_without_new_seed_prints_dot():
+    text, last_reported = format_progress_tick(
+        deref_count=10, progress_every=5, last_completed_seed=3, last_reported_seed=3
+    )
+    assert text == "."
+    assert last_reported == 3
+
+
+def test_format_progress_tick_marker_only_fires_once_per_seed_advance():
+    # second boundary after the same seed advance -> dot, not a repeat marker
+    _, after_first = format_progress_tick(
+        deref_count=5, progress_every=5, last_completed_seed=3, last_reported_seed=0
+    )
+    text, last_reported = format_progress_tick(
+        deref_count=10, progress_every=5, last_completed_seed=3, last_reported_seed=after_first
+    )
+    assert text == "."
+    assert last_reported == 3
+
+
+# ---- advance_seed_watermark (issue #22, restart/resume correctness) ------
+#
+# This is the fix for a real bug found during manual verification: an
+# earlier version tracked the *dispatch*-time seed index (the seed a
+# request was yielded for in start()), not completion. Scrapy's engine
+# drains the start() async generator to populate its scheduler far ahead of
+# actual throttled downloads, so dispatch-time tracking raced to "done" for
+# the entire seed file within seconds of a real run, regardless of how much
+# work had actually completed -- a Ctrl-C would then tell the user to
+# --resume-from a point that silently skipped almost everything. These
+# tests pin the completion-based watermark instead.
+
+
+def test_advance_seed_watermark_single_request_seed_resolves_immediately():
+    pending, resolved = {1: 1}, set()
+    result = advance_seed_watermark(pending, resolved, last_completed_seed=0, seed_index=1)
+    assert result == 1
+    assert pending == {}
+    assert resolved == set()
+
+
+def test_advance_seed_watermark_multi_request_seed_waits_for_all_pending():
+    # e.g. a DAP4 probe that fell through to a DAP2 fallback: two requests
+    # attributed to the same seed. The watermark must not advance after
+    # only the first of the two resolves.
+    pending, resolved = {1: 2}, set()
+    result = advance_seed_watermark(pending, resolved, last_completed_seed=0, seed_index=1)
+    assert result == 0
+    assert pending == {1: 1}
+    result = advance_seed_watermark(pending, resolved, last_completed_seed=result, seed_index=1)
+    assert result == 1
+    assert pending == {}
+
+
+def test_advance_seed_watermark_out_of_order_completion_does_not_skip_gap():
+    # seed 2 (a fast host) resolves before seed 1 (a slow host, still
+    # in flight) -- the watermark must stay at 0, not jump to 2, or a
+    # --resume-from taken at this point would skip seed 1 entirely.
+    pending, resolved = {1: 1, 2: 1}, set()
+    result = advance_seed_watermark(pending, resolved, last_completed_seed=0, seed_index=2)
+    assert result == 0
+    assert resolved == {2}
+    assert pending == {1: 1}
+
+
+def test_advance_seed_watermark_gap_fills_in_and_advances_past_both():
+    pending, resolved = {1: 1, 2: 1}, set()
+    after_seed_2 = advance_seed_watermark(pending, resolved, last_completed_seed=0, seed_index=2)
+    result = advance_seed_watermark(
+        pending, resolved, last_completed_seed=after_seed_2, seed_index=1
+    )
+    assert result == 2
+    assert pending == {}
+    assert resolved == set()
+
+
+def test_advance_seed_watermark_untracked_seed_defaults_to_single_pending():
+    # A request that was never explicitly begun (e.g. a defensive on_error
+    # call in a test) is treated as if it had one pending request, so ending
+    # it resolves the seed rather than going negative.
+    pending, resolved = {}, set()
+    result = advance_seed_watermark(pending, resolved, last_completed_seed=0, seed_index=5)
+    assert result == 0  # seed 5 resolves, but watermark can't skip seeds 1-4
+    assert resolved == {5}
+
+
 # ---- is_thredds_catalog --------------------------------------------------
 
 
@@ -149,7 +286,7 @@ def test_harness_on_dmr_confirms_dap4_from_body_signature(spider):
         body="Dataset { dmrVersion }",
         headers={"Content-Description": b"application/vnd.opendap.dap4.dataset-metadata+xml"},
     )
-    results = list(spider.on_dmr(response, base="http://example.org/data/foo"))
+    results = list(spider.on_dmr(response, base="http://example.org/data/foo", seed_index=1))
     assert results == [
         {
             "url": "http://example.org/data/foo",
@@ -168,12 +305,12 @@ BASE = "http://example.org/data/foo"
 
 
 def test_probe_yields_single_dmr_request(spider):
-    requests = list(spider.probe(BASE))
+    requests = list(spider.probe(BASE, seed_index=1))
     assert len(requests) == 1
     req = requests[0]
     assert req.url == BASE + ".dmr.xml"
     assert req.callback == spider.on_dmr
-    assert req.cb_kwargs == {"base": BASE}
+    assert req.cb_kwargs == {"base": BASE, "seed_index": 1}
     assert req.dont_filter is True
 
 
@@ -186,18 +323,18 @@ def test_on_dmr_fails_dap4_with_no_body_signature(spider):
         url=BASE + ".dmr.xml", body="not a real body", 
             headers={"Content-Description": b"application/vnd.opendap.dap4.dataset-metadata+xml"}
     )
-    results = list(spider.on_dmr(response, base=BASE))
+    results = list(spider.on_dmr(response, base=BASE, seed_index=1))
     assert len(results) == 1
     req = results[0]
     assert req.url == BASE + ".dds"
     assert req.callback == spider.on_dds
-    assert req.cb_kwargs == {"base": BASE}
+    assert req.cb_kwargs == {"base": BASE, "seed_index": 1}
     assert req.dont_filter is True
 
 
 def test_on_dmr_confirms_dap4_via_dmrversion_in_body(spider):
     response = make_response(url=BASE + ".dmr.xml", body="<Dataset dmrVersion='1.0'>")
-    results = list(spider.on_dmr(response, base=BASE))
+    results = list(spider.on_dmr(response, base=BASE, seed_index=1))
     assert len(results) == 1
     assert results[0]["dap_version"] == "4"
 
@@ -208,13 +345,13 @@ def test_on_dmr_includes_server_header_when_present(spider):
         body="dmrVersion",
         headers={"Server": b"Hyrax/1.17.1"},
     )
-    results = list(spider.on_dmr(response, base=BASE))
+    results = list(spider.on_dmr(response, base=BASE, seed_index=1))
     assert results[0]["server"] == "Hyrax/1.17.1"
 
 
 def test_on_dmr_missing_headers_decode_to_empty_string_not_error(spider):
     response = make_response(url=BASE + ".dmr.xml", body="dmrVersion")
-    results = list(spider.on_dmr(response, base=BASE))
+    results = list(spider.on_dmr(response, base=BASE, seed_index=1))
     assert results[0]["xdods_server"] == ""
     assert results[0]["server"] == ""
 
@@ -224,12 +361,12 @@ def test_on_dmr_missing_headers_decode_to_empty_string_not_error(spider):
 
 def test_on_dmr_no_signature_falls_through_to_dds_request(spider):
     response = make_response(url=BASE + ".dmr.xml", body="<html>not dap</html>")
-    results = list(spider.on_dmr(response, base=BASE))
+    results = list(spider.on_dmr(response, base=BASE, seed_index=1))
     assert len(results) == 1
     req = results[0]
     assert req.url == BASE + ".dds"
     assert req.callback == spider.on_dds
-    assert req.cb_kwargs == {"base": BASE}
+    assert req.cb_kwargs == {"base": BASE, "seed_index": 1}
     assert req.dont_filter is True
 
 
@@ -238,7 +375,7 @@ def test_on_dmr_non_200_falls_through_to_dds_even_if_body_would_match(spider):
     # a non-200 response falls through to the DAP2 attempt regardless of
     # whether the body looks like a DAP4 signature.
     response = make_response(url=BASE + ".dmr.xml", body="DAP/4.0", status=404)
-    results = list(spider.on_dmr(response, base=BASE))
+    results = list(spider.on_dmr(response, base=BASE, seed_index=1))
     assert len(results) == 1
     assert results[0].url == BASE + ".dds"
 
@@ -248,7 +385,7 @@ def test_on_dmr_non_200_falls_through_to_dds_even_if_body_would_match(spider):
 
 def test_on_dds_confirms_dap2_via_body_signature(spider):
     response = make_response(url=BASE + ".dds", body="Dataset {\n  Float64 x;\n}")
-    results = list(spider.on_dds(response, base=BASE))
+    results = list(spider.on_dds(response, base=BASE, seed_index=1))
     assert results == [
         {
             "url": BASE,
@@ -270,7 +407,7 @@ def test_on_dds_xdods_header_alone_is_not_sufficient(spider):
     response = make_response(
         url=BASE + ".dds", body="not a dds body", headers={"XDODS-Server": b"dods/3.7"}
     )
-    results = list(spider.on_dds(response, base=BASE))
+    results = list(spider.on_dds(response, base=BASE, seed_index=1))
     assert results == []
 
 
@@ -280,14 +417,14 @@ def test_on_dds_records_xdods_header_when_body_signature_present(spider):
         body="Dataset {\n  Float64 x;\n}",
         headers={"XDODS-Server": b"dods/3.7"},
     )
-    results = list(spider.on_dds(response, base=BASE))
+    results = list(spider.on_dds(response, base=BASE, seed_index=1))
     assert len(results) == 1
     assert results[0]["xdods_server"] == "dods/3.7"
 
 
 def test_on_dds_tolerates_leading_whitespace_before_signature(spider):
     response = make_response(url=BASE + ".dds", body="   \n  Dataset {\n}")
-    results = list(spider.on_dds(response, base=BASE))
+    results = list(spider.on_dds(response, base=BASE, seed_index=1))
     assert len(results) == 1
 
 
@@ -314,7 +451,7 @@ def test_on_dds_rejects_real_erddap_ui_pages_that_carry_xdods_header(spider, slu
     # Before the fix, header presence alone confirmed all three as
     # false-positive "DAP2 endpoints".
     response, _ = load_captured_response(slug)
-    results = list(spider.on_dds(response, base="http://example.org/irrelevant-base"))
+    results = list(spider.on_dds(response, base="http://example.org/irrelevant-base", seed_index=1))
     assert results == []
 
 
@@ -322,7 +459,7 @@ def test_on_dds_still_confirms_real_hyrax_true_positive(spider):
     response, _ = load_captured_response("test.opendap.org_8080-3b6f8c0461-dds")
     results = list(
         spider.on_dds(
-            response, base="http://test.opendap.org:8080/opendap/data/nc/fnoc1.nc"
+            response, base="http://test.opendap.org:8080/opendap/data/nc/fnoc1.nc", seed_index=1
         )
     )
     assert len(results) == 1
@@ -331,7 +468,7 @@ def test_on_dds_still_confirms_real_hyrax_true_positive(spider):
 
 def test_on_dds_no_signal_yields_nothing(spider):
     response = make_response(url=BASE + ".dds", body="<html>404-ish page</html>")
-    results = list(spider.on_dds(response, base=BASE))
+    results = list(spider.on_dds(response, base=BASE, seed_index=1))
     assert results == []
 
 
@@ -339,7 +476,7 @@ def test_on_dds_non_200_yields_nothing_even_if_body_would_match(spider):
     response = make_response(
         url=BASE + ".dds", body="Dataset {\n}", status=500
     )
-    results = list(spider.on_dds(response, base=BASE))
+    results = list(spider.on_dds(response, base=BASE, seed_index=1))
     assert results == []
 
 
@@ -347,8 +484,12 @@ def test_on_dds_non_200_yields_nothing_even_if_body_would_match(spider):
 
 
 def test_on_error_does_not_raise(spider):
-    failure = types.SimpleNamespace(value=Exception("boom"))
+    failure = types.SimpleNamespace(
+        value=Exception("boom"),
+        request=types.SimpleNamespace(cb_kwargs={"seed_index": 1}),
+    )
     spider.on_error(failure)  # no assertion beyond "did not raise"
+    assert spider._last_completed_seed == 1
 
 
 # ---- DapSpider.parse_thredds_catalog (plan Step A3) -----------------------
@@ -372,7 +513,7 @@ def test_parse_thredds_catalog_follows_subcatalog_ref(spider):
   <catalogRef xlink:href="sub/catalog.xml" xlink:title="Sub"/>
 </catalog>"""
     response = make_xml_response(url=CATALOG_URL, body=body)
-    results = list(spider.parse_thredds_catalog(response))
+    results = list(spider.parse_thredds_catalog(response, seed_index=1))
     assert len(results) == 1
     assert results[0].url == "http://example.org/thredds/catalog/sub/catalog.xml"
     assert results[0].callback == spider.parse_thredds_catalog
@@ -388,7 +529,7 @@ def test_parse_thredds_catalog_matches_servicetype_case_insensitively(
   <dataset name="foo" urlPath="test/foo.nc"/>
 </catalog>"""
     response = make_xml_response(url=CATALOG_URL, body=body)
-    results = list(spider.parse_thredds_catalog(response))
+    results = list(spider.parse_thredds_catalog(response, seed_index=1))
     assert len(results) == 1
     assert results[0].url == "http://example.org/thredds/dodsC/test/foo.nc.dmr.xml"
 
@@ -399,7 +540,7 @@ def test_parse_thredds_catalog_no_service_defaults_to_dodsc_prefix(spider):
   <dataset name="foo" urlPath="test/foo.nc"/>
 </catalog>"""
     response = make_xml_response(url=CATALOG_URL, body=body)
-    results = list(spider.parse_thredds_catalog(response))
+    results = list(spider.parse_thredds_catalog(response, seed_index=1))
     assert len(results) == 1
     assert results[0].url == "http://example.org/thredds/dodsC/test/foo.nc.dmr.xml"
 
@@ -412,7 +553,7 @@ def test_parse_thredds_catalog_multiple_opendap_services_probes_each(spider):
   <dataset name="foo" urlPath="test/foo.nc"/>
 </catalog>"""
     response = make_xml_response(url=CATALOG_URL, body=body)
-    results = list(spider.parse_thredds_catalog(response))
+    results = list(spider.parse_thredds_catalog(response, seed_index=1))
     urls = sorted(r.url for r in results)
     assert urls == sorted(
         [
@@ -436,7 +577,7 @@ def test_parse_thredds_catalog_matches_regardless_of_documents_own_prefix(spider
   <thredds:dataset name="foo" urlPath="test/foo.nc"/>
 </thredds:catalog>"""
     response = make_xml_response(url=CATALOG_URL, body=body)
-    results = list(spider.parse_thredds_catalog(response))
+    results = list(spider.parse_thredds_catalog(response, seed_index=1))
     assert len(results) == 1
     assert results[0].url == "http://example.org/thredds/dodsC/test/foo.nc.dmr.xml"
 
@@ -455,7 +596,7 @@ def test_parse_thredds_catalog_html_rendered_page_yields_nothing(spider):
     response = make_xml_response(
         url="http://example.org/thredds/catalog/catalog.html", body=body
     )
-    results = list(spider.parse_thredds_catalog(response))
+    results = list(spider.parse_thredds_catalog(response, seed_index=1))
     assert results == []
 
 
@@ -499,7 +640,7 @@ def test_start_probe_seed_uses_stripped_base_not_raw_url(tmp_path, spider):
     # base is the DAP-suffix-stripped seed, then probe() re-appends .dmr.xml
     # -- the raw seed URL itself is never requested directly
     assert results[0].url == "http://example.org/data/foo.dmr.xml"
-    assert results[0].cb_kwargs == {"base": "http://example.org/data/foo"}
+    assert results[0].cb_kwargs == {"base": "http://example.org/data/foo", "seed_index": 1}
 
 
 def test_start_probe_seed_strips_query_string_before_suffix(tmp_path, spider):
@@ -511,7 +652,7 @@ def test_start_probe_seed_strips_query_string_before_suffix(tmp_path, spider):
     # query string dropped AND suffix stripped, in that order -- not glued
     # onto the query string tail (issue #4)
     assert results[0].url == "http://example.org/data/foo.dmr.xml"
-    assert results[0].cb_kwargs == {"base": "http://example.org/data/foo"}
+    assert results[0].cb_kwargs == {"base": "http://example.org/data/foo", "seed_index": 1}
 
 
 def test_start_probe_seed_with_unsuffixed_query_string_issue_4(tmp_path, spider):
@@ -544,13 +685,49 @@ def test_start_probes_seed_with_no_suffix_as_is(tmp_path, spider):
     results = asyncio.run(_drain(spider.start()))
     assert len(results) == 1
     assert results[0].url == "http://example.org/data/foo.dmr.xml"
-    assert results[0].cb_kwargs == {"base": "http://example.org/data/foo"}
+    assert results[0].cb_kwargs == {"base": "http://example.org/data/foo", "seed_index": 1}
 
 
 def test_start_no_seeds_file_yields_nothing(spider):
     spider.seeds_file = None
     results = asyncio.run(_drain(spider.start()))
     assert results == []
+
+
+def test_start_resume_from_skips_already_processed_seeds(tmp_path, spider):
+    seeds = tmp_path / "seeds.txt"
+    seeds.write_text(
+        "http://a.example.org/data/foo.dds\n"
+        "http://b.example.org/data/bar.dds\n"
+        "http://c.example.org/data/baz.dds\n"
+    )
+    spider.seeds_file = str(seeds)
+    spider.resume_from = 2
+    results = asyncio.run(_drain(spider.start()))
+    # only the third seed (index 3) is dispatched; the first two are counted
+    # but not re-requested
+    assert len(results) == 1
+    assert results[0].url == "http://c.example.org/data/baz.dmr.xml"
+    assert spider._seed_index == 3
+    # only seed 3 was dispatched (one outstanding .dmr.xml request); seeds 1
+    # and 2 were skipped entirely, never even incrementing pending counts.
+    # start() alone (no Crawler pulling responses) never completes a
+    # request, so _last_completed_seed stays 0 here -- that's exercised via
+    # the on_dmr/on_dds/on_error paths and advance_seed_watermark directly.
+    assert spider._pending_by_seed == {3: 1}
+    assert spider._last_completed_seed == 0
+
+
+def test_start_resume_from_zero_dispatches_all_seeds(tmp_path, spider):
+    seeds = tmp_path / "seeds.txt"
+    seeds.write_text(
+        "http://a.example.org/data/foo.dds\nhttp://b.example.org/data/bar.dds\n"
+    )
+    spider.seeds_file = str(seeds)
+    spider.resume_from = 0
+    results = asyncio.run(_drain(spider.start()))
+    assert len(results) == 2
+    assert spider._pending_by_seed == {1: 1, 2: 1}
 
 
 # ---- Step B3: remaining real-world regression fixtures --------------------
@@ -581,7 +758,7 @@ def test_on_dmr_real_captures_fall_through_to_dds(spider, slug):
     # the jnlp-embedded-URL false positive (wcs.hycom.org).
     response, data = load_captured_response(slug)
     base = strip_dap_suffix(data["seed"])
-    results = list(spider.on_dmr(response, base=base))
+    results = list(spider.on_dmr(response, base=base, seed_index=1))
     assert len(results) == 1
     assert results[0].url == base + ".dds"
     assert results[0].callback == spider.on_dds
@@ -590,7 +767,7 @@ def test_on_dmr_real_captures_fall_through_to_dds(spider, slug):
 def test_on_dmr_real_hyrax_capture_confirms_dap4(spider):
     response, data = load_captured_response("test.opendap.org_8080-3b6f8c0461-dmr")
     base = strip_dap_suffix(data["seed"])
-    results = list(spider.on_dmr(response, base=base))
+    results = list(spider.on_dmr(response, base=base, seed_index=1))
     assert len(results) == 1
     assert results[0]["dap_version"] == "4"
     assert results[0]["url"] == base
@@ -614,7 +791,7 @@ def test_on_dds_real_captures_yield_nothing(spider, slug):
     # than a false positive), and the jnlp false positive (wcs.hycom.org).
     response, data = load_captured_response(slug)
     base = strip_dap_suffix(data["seed"])
-    results = list(spider.on_dds(response, base=base))
+    results = list(spider.on_dds(response, base=base, seed_index=1))
     assert results == []
 
 
@@ -634,7 +811,7 @@ def test_parse_thredds_catalog_real_captures_yield_nothing(spider, slug):
     # (catalog.html is a rendered view with zero InvCatalog elements) against
     # the real pages, not just a hand-written stand-in.
     response, _ = load_captured_response(slug)
-    results = list(spider.parse_thredds_catalog(response))
+    results = list(spider.parse_thredds_catalog(response, seed_index=1))
     assert results == []
 
 
