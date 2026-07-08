@@ -73,6 +73,61 @@ def is_thredds_catalog(url: str) -> bool:
     return "/thredds/catalog" in p and (p.endswith(".html") or p.endswith(".xml") or p.endswith("/"))
 
 
+def should_dispatch_seed(seed_index: int, resume_from: int) -> bool:
+    """Whether a seed URL (1-based position in the seeds file, counting
+    only non-blank/non-comment lines) should be dispatched, given a
+    --resume-from value of seeds already processed in a prior run."""
+    return seed_index > resume_from
+
+
+def format_progress_tick(
+    deref_count: int,
+    progress_every: int | None,
+    last_completed_seed: int,
+    last_reported_seed: int,
+) -> tuple[str | None, int]:
+    """Decide what _tick_progress should print, if anything.
+
+    Returns (text_or_None, updated_last_reported_seed). Prints nothing
+    unless deref_count lands on a progress_every boundary; on a boundary,
+    prints '[<seed>]' once per seed advance (issue #22) and a plain '.'
+    otherwise, matching the existing dot-per-Nth-dereference cadence.
+    """
+    if not progress_every or deref_count % progress_every != 0:
+        return None, last_reported_seed
+    if last_completed_seed > last_reported_seed:
+        return f"[{last_completed_seed}]", last_completed_seed
+    return ".", last_reported_seed
+
+
+def advance_seed_watermark(
+    pending_by_seed: dict, resolved_seeds: set, last_completed_seed: int, seed_index: int
+) -> int:
+    """Record that one outstanding request belonging to seed_index has been
+    resolved (mutates pending_by_seed/resolved_seeds in place), and return
+    the (possibly advanced) low-water mark: the largest N such that every
+    seed 1..N has zero outstanding requests.
+
+    A seed can own more than one request (a DAP4-then-DAP2 fallback probe,
+    or a THREDDS catalog's recursive sub-catalog/dataset requests), so a
+    seed only resolves once its pending count reaches zero. The watermark
+    only advances through a *contiguous* prefix of resolved seeds -- e.g. if
+    seed 2 resolves before seed 1 (a faster host, concurrent domains), the
+    mark stays at 0 until seed 1 also resolves, rather than skipping past
+    seed 1 on a later --resume-from. This is what makes the resume point
+    reflect completed work instead of merely dispatched work (issue #22).
+    """
+    pending_by_seed[seed_index] = pending_by_seed.get(seed_index, 1) - 1
+    if pending_by_seed[seed_index] > 0:
+        return last_completed_seed
+    del pending_by_seed[seed_index]
+    resolved_seeds.add(seed_index)
+    while (last_completed_seed + 1) in resolved_seeds:
+        last_completed_seed += 1
+        resolved_seeds.discard(last_completed_seed)
+    return last_completed_seed
+
+
 from urllib.parse import urlsplit, urlunsplit
 
 def to_xml(url: str) -> str:
@@ -163,23 +218,41 @@ class DapSpider(scrapy.Spider):
         # Seed-line bookkeeping for restart/resume (issue #22). Counts seed
         # *URLs* (non-blank, non-comment lines), not raw file lines.
         self._seed_index = 0
-        self._last_dispatched_seed = 0
+        # Per-seed pending-request tracking (see advance_seed_watermark):
+        # _last_completed_seed is a low-water mark reflecting completed
+        # work, not merely dispatched work. Deliberately not tracking
+        # dispatch-time progress -- dispatch races far ahead of throttled
+        # completion, which would make Ctrl-C report "done" for seeds that
+        # were only scheduled, never actually probed.
+        self._pending_by_seed = {}
+        self._resolved_seeds = set()
+        self._last_completed_seed = 0
         self._last_reported_seed = 0
 
+    def _begin_seed_request(self, seed_index):
+        """Record one outstanding request attributed to seed_index."""
+        self._pending_by_seed[seed_index] = self._pending_by_seed.get(seed_index, 0) + 1
+
+    def _end_seed_request(self, seed_index):
+        """Record that one outstanding request attributed to seed_index has
+        resolved, and advance the completed-seed watermark if possible."""
+        self._last_completed_seed = advance_seed_watermark(
+            self._pending_by_seed, self._resolved_seeds, self._last_completed_seed, seed_index
+        )
+
     def _tick_progress(self):
-        """Print a '.' every Nth dereference (response or failure), across
-        on_dmr/on_dds/parse_thredds_catalog/on_error combined. If the seed
-        index has advanced since the last printed marker, print
-        '[<seed index>]' instead of a bare dot (issue #22), still
-        rate-limited by progress_every rather than firing on every seed."""
+        """Tick the dereference counter (response or failure), across
+        on_dmr/on_dds/parse_thredds_catalog/on_error combined, and print
+        whatever format_progress_tick decides for this tick."""
         self._deref_count += 1
-        if not (self.progress_every and self._deref_count % self.progress_every == 0):
-            return
-        if self._last_dispatched_seed > self._last_reported_seed:
-            print(f"[{self._last_dispatched_seed}]", end="", flush=True)
-            self._last_reported_seed = self._last_dispatched_seed
-        else:
-            print(".", end="", flush=True)
+        text, self._last_reported_seed = format_progress_tick(
+            self._deref_count,
+            self.progress_every,
+            self._last_completed_seed,
+            self._last_reported_seed,
+        )
+        if text:
+            print(text, end="", flush=True)
 
     def closed(self, reason):
         # trailing newline so a mid-line run of dots doesn't collide with the
@@ -195,10 +268,10 @@ class DapSpider(scrapy.Spider):
         # --log-level.
         if reason != "finished" and self.seeds_file:
             print(
-                f"Stopped after seed URL {self._last_dispatched_seed} of "
+                f"Stopped after seed URL {self._last_completed_seed} of "
                 f"{self.seeds_file}.\n"
                 f"Resume with: python dap_spider.py {self.seeds_file} "
-                f"--resume-from {self._last_dispatched_seed}",
+                f"--resume-from {self._last_completed_seed}",
                 file=sys.stderr,
             )
 
@@ -215,37 +288,42 @@ class DapSpider(scrapy.Spider):
                 if not url or url.startswith("#"):
                     continue
                 self._seed_index += 1
-                if self._seed_index <= self.resume_from:
+                if not should_dispatch_seed(self._seed_index, self.resume_from):
                     # Already processed in a prior run (--resume-from); count
                     # it but don't re-dispatch a request for it.
                     continue
+                seed_index = self._seed_index
                 if is_thredds_catalog(url):
                     url = to_xml(url)
                     self.logger.info(f"seed [thredds catalog]: {url}")
+                    self._begin_seed_request(seed_index)
                     yield scrapy.Request(
-                        url, callback=self.parse_thredds_catalog, errback=self.on_error
+                        url,
+                        callback=self.parse_thredds_catalog,
+                        errback=self.on_error,
+                        cb_kwargs={"seed_index": seed_index},
                     )
                 else:
                     # Added call to strip the query string. jhrg 7/6/26
                     base = strip_dap_suffix(strip_query_string(url))
                     self.logger.info(f"seed [probe]: {url} -> base {base}")
-                    for req in self.probe(base):
+                    for req in self.probe(base, seed_index):
                         yield req
-                self._last_dispatched_seed = self._seed_index
 
     # ---- DAP probing ---------------------------------------------------
 
-    def probe(self, base: str):
+    def probe(self, base: str, seed_index: int):
         """Try DAP4 first, fall back to DAP2."""
+        self._begin_seed_request(seed_index)
         yield scrapy.Request(
             base + ".dmr.xml", # Changed from .dmr.xml to just .dmr
             callback=self.on_dmr,
             errback=self.on_error,
-            cb_kwargs={"base": base},
+            cb_kwargs={"base": base, "seed_index": seed_index},
             dont_filter=True,
         )
 
-    def on_dmr(self, response, base):
+    def on_dmr(self, response, base, seed_index):
         """
         Both Hyrax/DAP4 and TDS/DAP4 include a Content-Description
         header value application/vnd.opendap.dap4.dataset-metadata+xml.
@@ -262,22 +340,25 @@ class DapSpider(scrapy.Spider):
                 "probe_url": response.url,
                 # drop 'xdap' and use Content-Description. jhrg 7/6/26
                 "content_description": response.headers.get("Content-Description", b"").decode("latin1"),
-                # With scrapy, header lookup is case-insensitive. ERDDSP has this 
+                # With scrapy, header lookup is case-insensitive. ERDDSP has this
                 # header as lowercase. jhrg 7/6/26
                 "xdods_server": response.headers.get("XDODS-Server", b"").decode("latin1"),
                 "server": response.headers.get("Server", b"").decode("latin1"),
             }
+            self._end_seed_request(seed_index)
             return
         # not DAP4 -> try DAP2
+        self._begin_seed_request(seed_index)
         yield scrapy.Request(
             base + ".dds",
             callback=self.on_dds,
             errback=self.on_error,
-            cb_kwargs={"base": base},
+            cb_kwargs={"base": base, "seed_index": seed_index},
             dont_filter=True,
         )
+        self._end_seed_request(seed_index)
 
-    def on_dds(self, response, base):
+    def on_dds(self, response, base, seed_index):
         # The body signature is required, not just a supporting signal: some
         # ERDDAP hosts stamp XDODS-Server/Content-Description on ordinary UI
         # pages (index listings, "Make A Graph" forms), not just genuine DDS
@@ -294,10 +375,11 @@ class DapSpider(scrapy.Spider):
                 "xdods_server": response.headers.get("XDODS-Server", b"").decode("latin1"),
                 "server": response.headers.get("Server", b"").decode("latin1"),
             }
+        self._end_seed_request(seed_index)
 
     # ---- THREDDS catalog recursion ------------------------------------
 
-    def parse_thredds_catalog(self, response):
+    def parse_thredds_catalog(self, response, seed_index):
         self._tick_progress()
         sel = response.selector
         for ns, uri in THREDDS_NS.items():
@@ -305,8 +387,12 @@ class DapSpider(scrapy.Spider):
 
         # 1) follow sub-catalogs (catalogRef hrefs are relative to this catalog)
         for href in sel.xpath("//t:catalogRef/@xlink:href").getall():
+            self._begin_seed_request(seed_index)
             yield response.follow(
-                href, callback=self.parse_thredds_catalog, errback=self.on_error
+                href,
+                callback=self.parse_thredds_catalog,
+                errback=self.on_error,
+                cb_kwargs={"seed_index": seed_index},
             )
 
         # 2) find OPeNDAP service base(s) (serviceType is case-insensitive)
@@ -320,13 +406,21 @@ class DapSpider(scrapy.Spider):
         for url_path in sel.xpath("//t:dataset[@urlPath]/@urlPath").getall():
             for base in opendap_bases or ["/thredds/dodsC/"]:
                 access = urljoin(response.url, base.rstrip("/") + "/" + url_path)
-                yield from self.probe(access)
+                yield from self.probe(access, seed_index)
+
+        # this catalog fetch itself is resolved -- any sub-catalog/probe
+        # requests it just spawned already incremented the pending count
+        # above, so this doesn't let the watermark advance prematurely.
+        self._end_seed_request(seed_index)
 
     # ---- error handling -----------------------------------------------
 
     def on_error(self, failure):
         # dead hosts / timeouts / 4xx-5xx: log and move on, never crash the run
         self._tick_progress()
+        seed_index = failure.request.cb_kwargs.get("seed_index")
+        if seed_index is not None:
+            self._end_seed_request(seed_index)
         self.logger.debug("request failed: %s", failure.value)
 
 
