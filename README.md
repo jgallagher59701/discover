@@ -48,8 +48,11 @@ IDS. Loosen them only for hosts you operate or have permission to hit hard.
 ## Tests
 
 ```bash
-pip install pytest
-pytest tests/ -v
+pytest -v
+
+# For tests that use the network - designed to use only limited network resources.
+# jhrg 7/9/26
+pytest -v -m live
 ```
 
 Unit tests for the pure helper functions (`strip_dap_suffix`,
