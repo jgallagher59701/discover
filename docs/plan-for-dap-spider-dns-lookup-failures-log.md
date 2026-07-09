@@ -121,3 +121,72 @@ of the plan in one shot."
    test explicitly: `pytest -m live -q` → 1 passed. Environment: conda env
    `discover` at `/Users/jhrg/miniforge3/envs/discover` (Scrapy 2.16.0,
    Twisted 26.4.0, Python 3.14.6).
+
+## 2026-07-09 (fix: live suite fails when both live tests run together, issue #28)
+
+**Prompt:** "the live test suite fails. See issue #28 (The live test suite
+fails). Develop a fix for this - add info to the plan log
+docs/plan-for-dap-spider-dns-lookup-failures-log.md"
+
+**Reasoning steps:**
+
+1. `gh issue view 28` — reporter ran `pytest -v -m live` and got
+   `twisted.internet.error.ReactorNotRestartable` on the second of the two
+   live tests (`tests/test_live_smoke.py::test_live_crawl_runs_end_to_end`),
+   even though each test passes on its own. The traceback pointed at
+   `CrawlerProcess.start()` → `reactor.run()` →
+   `startRunning()` → `raise error.ReactorNotRestartable()` because
+   `self._startedBefore` was already `True`.
+2. Root cause: a Twisted reactor can be started (`reactor.run()`) at most
+   once per **process**, ever — not per `CrawlerProcess` instance. The live
+   test I added in the prior session
+   (`test_dns_failure_log_filter_silences_real_robotstxt_dns_failure`) also
+   calls `CrawlerProcess(...).start()` directly in-process, so once both
+   live tests are selected in the same `pytest` invocation, whichever runs
+   second hits an already-started reactor and fails with exactly the error
+   in the issue. This is independent of which test runs first — order
+   doesn't matter, only count (more than one in-process `reactor.run()` call
+   anywhere in the session is fatal to the second one).
+3. Considered and rejected: (a) restructuring both live tests to share one
+   `CrawlerProcess`/one `process.start()` call — would require coupling two
+   otherwise-independent test files through a shared fixture, more
+   invasive than the bug warrants; (b) adding `pytest-twisted` to keep a
+   long-lived reactor across the session — new dependency, not currently in
+   `requirements.txt`/the conda env recipe in CLAUDE.md, avoided without
+   asking first. Chose: run *my* live test's crawl in a fresh subprocess,
+   since a new process always has a never-started reactor regardless of
+   what ran earlier in the parent `pytest` process. This fixes the
+   collision without touching the pre-existing `test_live_smoke.py`,
+   keeping the change scoped to the test I added (per CLAUDE.md's "keep
+   edits narrowly scoped").
+4. Implementation choice: `subprocess.run([sys.executable, "-c", script])`
+   with a self-contained script string, rather than `multiprocessing
+   .Process` with a module-level target function. Rejected
+   `multiprocessing` because its default "spawn" start method (confirmed
+   via `multiprocessing.get_start_method()` → `'spawn'` on this macOS/conda
+   setup) needs to re-import whatever module defines the target function in
+   the child, and pytest test modules aren't always importable under a
+   stable dotted name from a fresh interpreter (no `__init__.py` under
+   `tests/`, so pytest imports this file as a bare top-level module) --
+   `subprocess.run` with an inline script sidesteps that entirely: no
+   pickling, no module-resolution question, and the child only needs
+   `cwd=<repo root>` so `import dap_spider` (a plain top-level module, not a
+   package) resolves.
+5. Rewrote the test: `_DNS_FAILURE_PROBE_SCRIPT` (module-level string in
+   `tests/test_dap_spider.py`) builds the same throwaway spider as before
+   (still with `errback=self.on_error`, still targeting the `.invalid` TLD),
+   runs it under its own `CrawlerProcess`, and writes everything logged at
+   INFO+ to an in-process `io.StringIO` (via a plain `logging.StreamHandler`
+   attached to the root logger) which it then prints to stdout. The test
+   function runs that script with `subprocess.run(..., capture_output=True,
+   text=True, timeout=60)` and asserts on `result.stdout` instead of
+   `caplog` (caplog can't observe a child process). Removed the
+   now-unused top-level `scrapy` / `CrawlerProcess` imports from
+   `tests/test_dap_spider.py` (only the subprocess script needs them now,
+   and it imports them itself).
+6. Verified against the issue's exact repro: `pytest -v -m live` (both live
+   tests selected together) → 2 passed (previously 1 passed, 1 failed with
+   `ReactorNotRestartable`). Re-ran with the two test files reversed on the
+   command line to confirm order-independence → 2 passed. Re-ran the full
+   default suite (`pytest -q`) → 104 passed, 2 deselected, confirming the
+   fix didn't disturb anything outside the live tests.
