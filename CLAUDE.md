@@ -25,6 +25,7 @@ candidates (expensive, hits real hosts) beats a broad crawl.
 - In the log, include the date and time, the prompt and the reasoning steps taken.
 - When implementing a plan, you may query web sites, write code in the open repository and compile and run software. You may run commands in the repository directories (rg, ls, etc.) as needed to make or carry out the plan. You may activate conda environments if needed to run tests.
 - At the end of each step of a plan, update the plan log with a time stamp and any reasoning and then wait for me to review your work.
+- Plan and plan logs in the `docs/completed` directory should be considered old and may not reflect the current state of the software.
 
 
 ## Communication
@@ -134,7 +135,7 @@ non-HTML bodies instead of scraping links.
 
 ## Data files
 
-`candidate_urls*.{txt,csv}` in the repo root are generated Stage-1 output
+`candidate_urls*.{txt,csv}` in the `crawls/{first,second,third} directories are generated Stage-1 output
 snapshots from past runs (see `NOTE.md` for what each one is), not
 hand-maintained inputs — regenerate with `cc_dap_discover.py` rather than
 editing them.
