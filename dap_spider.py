@@ -29,12 +29,17 @@ Notes:
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 import scrapy
 from scrapy.crawler import CrawlerProcess
+from scrapy.exceptions import CannotResolveHostError
+from twisted.internet.error import DNSLookupError
+
+logger = logging.getLogger(__name__)
 
 # Stage-2 output path, referenced both in DapSpider.custom_settings (FEEDS)
 # and in main() to truncate it for a fresh (non-resumed) run.
@@ -176,6 +181,34 @@ class IdentityEncodingMiddleware:
         elif raw:
             del response.headers["Content-Encoding"]
         return response
+
+
+class DnsFailureLogFilter(logging.Filter):
+    """
+    RobotsTxtMiddleware logs *every* robots.txt-fetch failure at ERROR with a
+    full traceback, including plain DNS lookup failures -- routine and
+    expected across a large seed list (issue #26). Downgrade just that case
+    to a single INFO line naming the host; anything else (a 500, malformed
+    response, timeout, ...) still surfaces at ERROR as before.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        exc = record.exc_info[1] if record.exc_info else None
+        if not isinstance(exc, (CannotResolveHostError, DNSLookupError)):
+            return True
+
+        host = None
+        request = record.args.get("request") if isinstance(record.args, dict) else None
+        if request is not None:
+            host = urlparse(request.url).netloc
+
+        logger.info("DNS lookup failed for %s", host or "<unknown host>")
+        return False
+
+
+logging.getLogger("scrapy.downloadermiddlewares.robotstxt").addFilter(
+    DnsFailureLogFilter()
+)
 
 
 class DapSpider(scrapy.Spider):

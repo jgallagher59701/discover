@@ -1,9 +1,14 @@
 import asyncio
+import logging
 import types
 
 import pytest
+import scrapy
+from scrapy.crawler import CrawlerProcess
 from scrapy.downloadermiddlewares.httpcompression import HttpCompressionMiddleware
+from scrapy.exceptions import CannotResolveHostError
 from scrapy.http import Request
+from twisted.internet.error import DNSLookupError
 
 from conftest import load_captured_response, make_response, make_xml_response
 from dap_spider import (
@@ -870,3 +875,108 @@ def test_identity_encoding_middleware_prevents_httpcompression_warning(caplog):
     ):
         HttpCompressionMiddleware().process_response(request, stripped)
     assert "unsupported encoding" not in caplog.text
+
+
+# ---- DnsFailureLogFilter (issue #26) ---------------------------------------
+#
+# RobotsTxtMiddleware.robot_parser (scrapy/downloadermiddlewares/robotstxt.py)
+# logs *every* robots.txt-fetch failure at ERROR with a full traceback,
+# including plain DNS lookup failures -- routine and expected across a large
+# seed list. DnsFailureLogFilter, registered on that logger at dap_spider
+# import time, downgrades just that case to a single INFO line naming the
+# host and drops the original record; anything else still surfaces at ERROR.
+
+
+def _log_robotstxt_error(exc, request):
+    """Fabricate the exact ERROR + traceback log call robot_parser makes on
+    a robots.txt-fetch failure, so DnsFailureLogFilter can be exercised
+    without a real crawl. exc_info=True needs a live exception, hence the
+    raise/except round-trip."""
+    robots_logger = logging.getLogger("scrapy.downloadermiddlewares.robotstxt")
+    try:
+        raise exc
+    except type(exc):
+        robots_logger.error(
+            "Error downloading %(request)s: %(f_exception)s",
+            {"request": request, "f_exception": exc},
+            exc_info=True,
+        )
+
+
+def test_dns_failure_log_filter_silences_cannot_resolve_host_error(caplog):
+    request = Request("http://dead-host.example.org/thredds/dodsC/21.dmr.xml")
+    with caplog.at_level(logging.INFO):
+        _log_robotstxt_error(CannotResolveHostError("DNS lookup failed"), request)
+    assert "Error downloading" not in caplog.text
+    assert "Traceback" not in caplog.text
+    assert "DNS lookup failed for dead-host.example.org" in caplog.text
+
+
+def test_dns_failure_log_filter_silences_raw_twisted_dns_lookup_error(caplog):
+    # Defensive branch: some code path could raise the unwrapped Twisted
+    # exception directly instead of Scrapy's CannotResolveHostError wrapper.
+    request = Request("http://dead-host.example.org/thredds/dodsC/21.dmr.xml")
+    with caplog.at_level(logging.INFO):
+        _log_robotstxt_error(DNSLookupError("dead-host.example.org"), request)
+    assert "Error downloading" not in caplog.text
+    assert "Traceback" not in caplog.text
+    assert "DNS lookup failed for dead-host.example.org" in caplog.text
+
+
+def test_dns_failure_log_filter_leaves_other_robotstxt_errors_at_error(caplog):
+    # Not a DNS failure -- must not be silently swallowed.
+    request = Request("http://flaky-host.example.org/thredds/dodsC/21.dmr.xml")
+    with caplog.at_level(logging.INFO):
+        _log_robotstxt_error(TimeoutError("timed out"), request)
+    assert "Error downloading" in caplog.text
+    assert "DNS lookup failed for" not in caplog.text
+
+
+@pytest.mark.live
+def test_dns_failure_log_filter_silences_real_robotstxt_dns_failure(caplog):
+    """
+    Live-network exception to the "no HTTP requests to remote hosts" tests
+    policy in CLAUDE.md, approved for this issue: drives a real Scrapy crawl
+    against a hostname under the .invalid TLD (RFC 2606 -- reserved to
+    always fail DNS resolution, so this never reaches an actual host) to
+    confirm the filter silences a genuine CannotResolveHostError raised by
+    RobotsTxtMiddleware end to end, not just a fabricated log record.
+
+    Excluded from the default run (pytest.ini: addopts = -m "not live");
+    run explicitly with: pytest -m live
+    """
+
+    class _DnsFailureProbeSpider(scrapy.Spider):
+        # Mirrors dap_spider.py's real requests, which always set
+        # errback=self.on_error (see plan root-cause section) -- without
+        # one, Scrapy's own generic per-request failure logging (a
+        # differently-sourced "Error downloading ..." message, unrelated to
+        # RobotsTxtMiddleware) would confound this test's assertions.
+        name = "dns_failure_probe"
+        custom_settings = {"ROBOTSTXT_OBEY": True, "RETRY_ENABLED": False}
+
+        async def start(self):
+            yield scrapy.Request(
+                "http://this-host-does-not-resolve.invalid/probe",
+                callback=self.parse,
+                errback=self.on_error,
+            )
+
+        def parse(self, response):
+            return
+
+        def on_error(self, failure):
+            return
+
+    with caplog.at_level(logging.INFO):
+        process = CrawlerProcess(
+            settings={"LOG_ENABLED": False}, install_root_handler=False
+        )
+        process.crawl(_DnsFailureProbeSpider)
+        process.start()
+
+    assert "Error downloading" not in caplog.text
+    assert "Traceback" not in caplog.text
+    assert (
+        "DNS lookup failed for this-host-does-not-resolve.invalid" in caplog.text
+    )

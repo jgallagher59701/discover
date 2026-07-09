@@ -60,3 +60,64 @@ exceptions) and plan to fix that."
    positive DNS case, the defensive unwrapped-`DNSLookupError` case, and a
    negative case proving other exception types are untouched). Did not
    implement yet — stopping here for review per the plan-review workflow.
+
+## 2026-07-09 (implementation)
+
+**Prompt:** "Implement the plan in
+docs/plan-for-dap-spider-dns-lookup-failures.md. Note that I modified it and
+added a fourth test that will use the live network. Implement all the steps
+of the plan in one shot."
+
+**Reasoning steps:**
+
+1. Re-read the plan (user had added Step 2.4 for a live-network test, plus
+   noted `pytest.ini` already carries a `live` marker excluded by default
+   via `addopts = -m "not live"` — confirmed this by reading `pytest.ini`).
+2. Read `dap_spider.py`'s existing imports and the `IdentityEncodingMiddleware`
+   / `DapSpider` boundary to place the new filter in the same spot, and
+   confirmed via the installed Scrapy 2.16.0 source
+   (`robotstxt.py:104-109`) exactly how `logger.error(...)` is called —
+   important detail: passing a single dict as the sole `%`-args argument
+   makes `logging.LogRecord` store it as `record.args` directly (not
+   wrapped in a tuple), so `record.args["request"]` is available and is the
+   *original* triggering request (confirming the plan's note that the URL
+   shown is not the robots.txt URL itself).
+3. Implemented `DnsFailureLogFilter(logging.Filter)` in `dap_spider.py`,
+   checking `record.exc_info[1]` against `CannotResolveHostError` /
+   `DNSLookupError`, deriving the host from `record.args["request"].url` via
+   `urlparse(...).netloc`, logging one `INFO` line through a new
+   module-level `logger = logging.getLogger(__name__)`, and returning
+   `False` to drop the original record. Registered it at import time via
+   `logging.getLogger("scrapy.downloadermiddlewares.robotstxt").addFilter(...)`
+   right before `class DapSpider`, matching `IdentityEncodingMiddleware`'s
+   placement/spirit.
+4. Added the three fabricated-record tests (`CannotResolveHostError`,
+   raw `DNSLookupError`, and a `TimeoutError` negative case) to
+   `tests/test_dap_spider.py`, using a shared `_log_robotstxt_error` helper
+   that does a raise/except round-trip so `exc_info=True` captures a real
+   exception, exactly mirroring `robot_parser`'s own log call. Confirmed
+   experimentally that a logger-level filter (added via `addFilter` on the
+   logger itself, not a handler) runs inside `Logger.handle()` before
+   propagation, so `caplog`'s root handler never sees the suppressed record
+   — no special caplog wiring needed beyond `caplog.at_level(logging.INFO)`
+   to also capture the new INFO line from the `dap_spider` logger.
+5. Added the live test (`test_dns_failure_log_filter_silences_real_robotstxt_dns_failure`,
+   marked `@pytest.mark.live`): a real `CrawlerProcess` crawl against a
+   hostname under the reserved `.invalid` TLD (RFC 2606 — guaranteed to
+   never resolve, so this never touches an actual host despite being a
+   genuine DNS failure), with `install_root_handler=False` /
+   `LOG_ENABLED=False` so Scrapy's own console handler doesn't interfere
+   with `caplog`. First attempt failed: the bare test spider had no
+   errback, so Scrapy's *own* generic per-request failure logging (a
+   differently-sourced, coincidentally similarly-worded "Error downloading
+   ..." message from `scrapy.core.scraper`, unrelated to
+   `RobotsTxtMiddleware`) also fired and broke the "no 'Error downloading'
+   in caplog.text" assertion. Fixed by giving the probe spider's request an
+   `errback` (mirroring the fact that every real `dap_spider.py` request
+   already sets `errback=self.on_error`, per the plan's root-cause
+   section), which isolates the assertion to the robots.txt-specific path.
+6. Ran the full suite: `pytest -q` → 104 passed, 2 deselected (the new live
+   test plus a pre-existing one in `tests/test_live_smoke.py`). Ran the live
+   test explicitly: `pytest -m live -q` → 1 passed. Environment: conda env
+   `discover` at `/Users/jhrg/miniforge3/envs/discover` (Scrapy 2.16.0,
+   Twisted 26.4.0, Python 3.14.6).
